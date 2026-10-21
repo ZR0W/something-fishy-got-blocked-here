@@ -12,7 +12,7 @@ Human-facing overview: [README.md](README.md).
 
 ## Status
 
-**In progress.** Done: pure logic (`src/common/`) with unit tests, dev tooling, icons, and a throwaway [diagnostic extension](tools/diagnostic/) for the owner's PC. **Waiting on:** the owner's diagnostic run (see "Open questions"). Background script, blocked page, options page and signing come after.
+**In progress, design blocked.** Done: pure logic (`src/common/`) with unit tests, dev tooling, icons, and a throwaway [diagnostic extension](tools/diagnostic/). The diagnostic run showed the browser sees DNS blocks and typos identically (see "Diagnostic findings"); a new detection method is being chosen with the owner.
 
 ## How it decides "blocked by my DNS"
 
@@ -24,6 +24,8 @@ DNS answers carry **no reason code**, so the browser cannot know *who* blocked a
 | NXDOMAIN (`dns.resolve` rejects) | Typo / non-existent name | Nothing (normal Firefox error) |
 | Any real address | Site down, refused, TLS error, … | Nothing |
 | Resolution fails entirely | Offline | Nothing |
+
+> **Caveat:** the table describes the DNS answers on the wire. Firefox on Windows does **not** get to see them — see "Diagnostic findings".
 
 Verified on the owner's PC (Windows, DNS pointed only at Pi-hole), 2026-10-21, with `nslookup`:
 
@@ -106,15 +108,20 @@ flowchart LR
 
 Prefix logs with `[something-fishy]`. Background console: `about:debugging` → the extension → **Inspect**.
 
-## Open questions (verify on the owner's PC before relying on them)
+## Diagnostic findings (owner's PC, Firefox 158.0.1, Windows, 2026-10-21)
 
-These are **not yet verified** — the diagnostic extension exists to answer them:
+From the [diagnostic extension](tools/diagnostic/) run:
 
-1. Does `webNavigation.onErrorOccurred` fire with `frameId: 0` when the name resolves to `0.0.0.0`/`::`? (Expected yes.)
-2. What `webRequest` error string does Firefox 158 on Windows report for a connection to `0.0.0.0`/`::`? (Unknown — do **not** assume `NS_ERROR_UNKNOWN_HOST`; Firefox may also refuse `0.0.0.0` before connecting.)
-3. Does `dns.resolve` work under MV3, and does it return `["::", "0.0.0.0"]` (or similar) with `isTRR: false`?
-4. What does `tabs.get(tabId).url` report while the Firefox error page is shown? (Needed for the "has the user moved on?" check.)
-5. Typo domain: does `dns.resolve` reject (expected), and with what message?
+- `browser.dns` exists and works under MV3; host permissions were granted to the temporary add-on.
+- **`dns.resolve()` rejects with `NS_ERROR_UNKNOWN_HOST` for Pi-hole-blocked (`ad.doubleclick.net`) and Cloudflare-blocked names — exactly the same as for a non-existent domain**, with or without `bypass_cache`, even though `nslookup` shows `0.0.0.0` / `::` for the blocked ones. So **the planned "all addresses are null" check can never fire on this setup.**
+  - Firefox's own resolver code (`netwerk/dns/`, checked in mozilla-central source) doesn't drop `0.0.0.0` answers; it fails when the OS resolver (`PR_GetAddrInfoByName`, i.e. Windows `getaddrinfo`) returns nothing. Hypothesis to verify: **Windows' resolver itself** turns all-null answers into "host not found" (`nslookup` bypasses that layer). If so, no Firefox pref changes it.
+- The page-load error is `NS_ERROR_UNKNOWN_HOST` in `webRequest.onErrorOccurred` for all three (blocked, blocked, typo).
+- **`webNavigation.onErrorOccurred` *does* populate `details.error` in Firefox 158** (MDN compat data says otherwise — stale), as `"Error code <decimal nsresult>"`: `2152398878` = `0x804B001E` = `NS_ERROR_UNKNOWN_HOST`, `2152398850` = `0x804B0002` = `NS_BINDING_ABORTED`.
+- `NS_BINDING_ABORTED` main-frame errors happen during normal browsing: HTTPS-First aborts the `http://` attempt before retrying `https://`, and theverge.com's main frame logged one while loading fine. **Must ignore aborted errors.**
+- Subframe failures (frameId ≠ 0) do occur on normal pages (a reCAPTCHA iframe on theverge.com) — confirms the main-frame-only rule.
+- While the error page is shown, `tabs.get().url` is the original URL and `status` is `complete`.
+- `isTRR: false` (DoH off) as expected.
+- Offline case: not yet run.
 
 ## Constraints (do not regress without intent)
 
@@ -129,7 +136,7 @@ These are **not yet verified** — the diagnostic extension exists to answer the
 
 ## Roadmap
 
-1. Diagnostic run on the owner's PC → resolve the open questions above.
+1. Choose a detection method that works given the diagnostic findings.
 2. Background script, blocked page, options page (rules editor, time windows, attempt counts + reset, DoH warning).
 3. Signing as an unlisted add-on via AMO (`npm run sign`), keys from environment variables.
 4. Optional, not started: Pi-hole v6 REST API lookup to say *which* list blocked a domain (needs an app password + LAN host permission; weigh with the owner first).
