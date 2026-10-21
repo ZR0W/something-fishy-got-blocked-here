@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Something Fishy — diagnostic log</title>
+    <style>
+      body { font: 14px system-ui, sans-serif; margin: 1rem; }
+      pre { white-space: pre-wrap; word-break: break-all; background: #f4f4f4; padding: 0.75rem; }
+      button { margin-right: 0.5rem; }
+    </style>
+  </head>
+  <body>
+    <h1>Diagnostic log</h1>
+    <p>
+      <button id="copy">Copy all</button>
+      <button id="refresh">Refresh</button>
+      <button id="clear">Clear</button>
+      <span id="status"></span>
+    </p>
+    <pre id="out"></pre>
+    <script src="log.js"></script>
+  </body>
+</html>

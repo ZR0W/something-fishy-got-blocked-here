@@ -1,0 +1,8 @@
+node_modules/
+web-ext-artifacts/
+
+# AMO signing credentials: never commit these (see README "Signing").
+.env
+.env.*
+*.local.ps1
+.amo-upload-uuid

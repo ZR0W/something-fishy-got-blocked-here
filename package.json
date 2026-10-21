@@ -1,0 +1,21 @@
+{
+  "name": "something-fishy",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Dev tooling only (lint, run, test, sign). The extension itself has no build step and no runtime dependencies.",
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test",
+    "lint": "web-ext lint",
+    "start": "web-ext run",
+    "build": "web-ext build --overwrite-dest",
+    "sign": "web-ext sign --channel=unlisted",
+    "diag": "web-ext run --source-dir tools/diagnostic --config tools/diagnostic/web-ext-config.cjs"
+  },
+  "devDependencies": {
+    "web-ext": "^10.8.0"
+  }
+}
