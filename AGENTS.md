@@ -109,7 +109,7 @@ flowchart LR
 
 ## How to run & test
 
-- `npm install` once (Node ≥ 20).
+- `npm install` once (Node ≥ 20.19: web-ext dependencies such as undici, cheerio, espree need it, though web-ext itself says ≥ 20).
 - `npm test` — unit tests. `npm run lint` — `web-ext lint`. `npm start` — throwaway Firefox profile with the extension, DoH forced off.
 - Or `about:debugging#/runtime/this-firefox` → **Load Temporary Add-on…** → `manifest.json` in the owner's real profile.
 - Manual matrix: README "Testing". **Test from the PC, never the server** (the server's DNS bypasses Pi-hole).

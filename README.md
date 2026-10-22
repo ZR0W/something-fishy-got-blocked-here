@@ -44,7 +44,7 @@ In `about:addons`, open Something Fishy's **⋯** menu → **Options**, or click
 
 ## Development setup (Windows / PowerShell)
 
-Needs Node ≥ 20 (`node -v`).
+Needs Node ≥ 20.19 — current LTS recommended (`node -v`; upgrade with `winget upgrade OpenJS.NodeJS.LTS` or the nodejs.org installer).
 
 ```powershell
 git clone https://github.com/ZR0W/something-fishy-got-blocked-here.git
