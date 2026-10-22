@@ -12,7 +12,7 @@ Human-facing overview: [README.md](README.md).
 
 ## Status
 
-Feature-complete v0.1. First test pass done; **awaiting a re-test of the intermittent-skip fix** (see Diagnostic findings). Signing (`npm run sign`) is set up but not yet run; the gecko id and name must be confirmed with the owner first (they're permanent on AMO).
+Feature-complete v0.1. **Re-test passed on the owner's PC (2026-10-22)** after the intermittent-skip fix; the offline case is still unobserved. Signing (`npm run sign`) is set up but not yet run; the gecko id and name must be confirmed with the owner first (they're permanent on AMO).
 
 ## How it decides "blocked by my DNS"
 
@@ -131,7 +131,7 @@ flowchart LR
 - Subframe failures occur on normal pages (reCAPTCHA iframe).
 - While the error page is shown, `tabs.get().url` is the original URL, `status: "complete"`.
 - **Offline behaviour: not yet observed** — covered by the guard, confirm in the test pass.
-- First test pass (2026-10-22): example.com, gravity block, typo (message shown, as agreed), ad-heavy page, Go back / Close tab, attempt counting all fine; the redirect was **intermittently skipped** (normal error page shown, incl. once for the Cloudflare-blocked site). Fixed by replacing the `tab.url` check (see Architecture step 5); awaiting re-test with the troubleshooting log on.
+- First test pass (2026-10-22): example.com, gravity block, typo (message shown, as agreed), ad-heavy page, Go back / Close tab, attempt counting all fine; the redirect was **intermittently skipped** (normal error page shown, incl. once for the Cloudflare-blocked site). Fixed by replacing the `tab.url` check (see Architecture step 5); owner's re-test: everything working.
 
 ## Constraints (do not regress without intent)
 
@@ -146,7 +146,7 @@ flowchart LR
 
 ## Roadmap
 
-1. Owner's test pass on the PC (README "Testing"), incl. the offline case.
+1. Offline case (cable unplugged → normal Firefox error) still to be observed.
 2. Confirm name + gecko id with the owner, then first `npm run sign` (unlisted).
 3. Optional, not started: an opt-in "is this really blocked?" refinement to stop typos showing the message — either a public DoH existence check (privacy cost: failed hostnames to the DoH provider) or the Pi-hole v6 API (app password + LAN host permission; would also say *which* list blocked it). Weigh with the owner first.
 4. Optional, not started: random rotation among several matching messages.
