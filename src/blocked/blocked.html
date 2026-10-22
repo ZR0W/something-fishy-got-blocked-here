@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Blocked</title>
+    <link rel="icon" href="../../icons/icon48.png" />
+    <link rel="stylesheet" href="../common/page.css" />
+    <link rel="stylesheet" href="blocked.css" />
+  </head>
+  <body>
+    <main>
+      <p class="sf-fish" aria-hidden="true">🐟</p>
+      <h1 id="title"></h1>
+      <p id="message" class="sf-message"></p>
+      <p id="count" class="sf-count" hidden></p>
+      <div class="sf-actions">
+        <button id="back" class="sf-primary" type="button">Go back</button>
+        <button id="close" type="button">Close tab</button>
+      </div>
+      <p id="url" class="sf-url sf-muted"></p>
+      <p class="sf-footer sf-muted">
+        Shown because your DNS wouldn't resolve <span id="host-inline"></span> — almost always a block,
+        occasionally a typo. ·
+        <a href="#" id="options">Edit messages</a>
+      </p>
+    </main>
+    <script src="../common/config.js"></script>
+    <script src="../common/rules.js"></script>
+    <script src="blocked.js"></script>
+  </body>
+</html>

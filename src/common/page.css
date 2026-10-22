@@ -1,0 +1,55 @@
+/* Shared look for the extension's own pages (blocked page, options page). */
+:root {
+  color-scheme: light dark;
+  --sf-bg: #f4f7f6;
+  --sf-card: #ffffff;
+  --sf-text: #1c2b2a;
+  --sf-muted: #5b6b69;
+  --sf-accent: #0f766e;
+  --sf-accent-text: #ffffff;
+  --sf-border: #d5dfdd;
+  --sf-warn-bg: #fff4d6;
+  --sf-warn-text: #6b4e00;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --sf-bg: #111a19;
+    --sf-card: #1a2625;
+    --sf-text: #e3eceb;
+    --sf-muted: #9aaeab;
+    --sf-accent: #2bb3a5;
+    --sf-accent-text: #061210;
+    --sf-border: #2c3c3a;
+    --sf-warn-bg: #3a2f10;
+    --sf-warn-text: #f3d98a;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--sf-bg);
+  color: var(--sf-text);
+  font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+button {
+  font: inherit;
+  padding: 0.45rem 1rem;
+  border-radius: 8px;
+  border: 1px solid var(--sf-border);
+  background: var(--sf-card);
+  color: var(--sf-text);
+  cursor: pointer;
+}
+button.sf-primary {
+  background: var(--sf-accent);
+  border-color: var(--sf-accent);
+  color: var(--sf-accent-text);
+}
+button:disabled { opacity: 0.5; cursor: default; }
+.sf-muted { color: var(--sf-muted); }
+.sf-warn {
+  background: var(--sf-warn-bg);
+  color: var(--sf-warn-text);
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+}

@@ -1,0 +1,19 @@
+main {
+  max-width: 36rem;
+  margin: 12vh auto 2rem;
+  padding: 2rem;
+  background: var(--sf-card);
+  border: 1px solid var(--sf-border);
+  border-radius: 16px;
+}
+.sf-fish { font-size: 2.5rem; line-height: 1; margin: 0 0 0.5rem; }
+h1 { margin: 0 0 1rem; font-size: 1.6rem; }
+.sf-message { font-size: 1.15rem; margin: 0 0 1.25rem; white-space: pre-wrap; }
+.sf-count { margin: 0 0 1.25rem; font-weight: 600; }
+.sf-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 1.5rem; }
+.sf-url { font-size: 0.85rem; word-break: break-all; margin: 0 0 0.5rem; }
+.sf-footer { font-size: 0.85rem; margin: 0; }
+.sf-footer a { color: var(--sf-accent); }
+@media (max-width: 40rem) {
+  main { margin: 1rem; padding: 1.25rem; }
+}

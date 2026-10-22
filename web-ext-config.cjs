@@ -12,6 +12,7 @@ module.exports = {
     "scripts",
     "tests",
     "tools",
+    "*.local.ps1",
   ],
   run: {
     startUrl: ["about:debugging#/runtime/this-firefox"],

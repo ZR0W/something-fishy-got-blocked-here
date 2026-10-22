@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Something Fishy — settings</title>
+    <link rel="icon" href="../../icons/icon48.png" />
+    <link rel="stylesheet" href="../common/page.css" />
+    <link rel="stylesheet" href="options.css" />
+  </head>
+  <body>
+    <main>
+      <h1>Something Fishy 🐟</h1>
+      <p class="sf-muted">
+        Messages shown when your DNS blocks a site. Everything here stays in this browser
+        (<code>storage.local</code>).
+      </p>
+
+      <div id="doh-warning" class="sf-warn" hidden>
+        <strong>DNS over HTTPS was used</strong> on <span id="doh-when"></span>. With DoH on, Firefox
+        bypasses Pi-hole, so blocked sites load and this extension never triggers. Turn it off in
+        Settings → Privacy &amp; Security → DNS over HTTPS.
+        <button id="doh-dismiss" type="button">Dismiss</button>
+      </div>
+
+      <section>
+        <h2>Default</h2>
+        <label class="sf-field">Title <input id="default-title" type="text" /></label>
+        <label class="sf-check"><input id="show-count" type="checkbox" /> Show the attempt count</label>
+        <h3>Messages</h3>
+        <div id="default-messages"></div>
+      </section>
+
+      <section>
+        <h2>Per-site rules</h2>
+        <p class="sf-muted">The first enabled rule that matches is used, top to bottom.</p>
+        <div id="rules"></div>
+        <button id="add-rule" type="button">+ Add rule</button>
+      </section>
+
+      <div class="sf-savebar">
+        <button id="save" class="sf-primary" type="button">Save</button>
+        <button id="preview" type="button" title="Opens the message page using the saved settings">Preview (saved)</button>
+        <button id="restore" type="button">Restore defaults</button>
+        <span id="status" role="status"></span>
+      </div>
+
+      <section>
+        <h2>Attempts</h2>
+        <p class="sf-muted">Counted locally each time a blocked page is replaced.</p>
+        <table>
+          <thead>
+            <tr><th>Site</th><th>Count</th><th>First</th><th>Last</th><th></th></tr>
+          </thead>
+          <tbody id="attempts"></tbody>
+        </table>
+        <button id="reset-all" type="button">Reset all counts</button>
+      </section>
+
+      <section class="sf-help">
+        <h2>Help</h2>
+        <ul>
+          <li><b>Patterns:</b> <code>example.com</code> = the domain and all its subdomains ·
+            <code>=example.com</code> = exactly that host · <code>*.example.com</code> = subdomains only.
+            Optional <b>path</b> is a prefix, e.g. <code>/r/news</code>.</li>
+          <li><b>Placeholders:</b> <code>{host}</code>, <code>{url}</code>, <code>{count}</code>,
+            <code>{time}</code>.</li>
+          <li><b>Time of day:</b> leave both times empty for "any time", or set both. The first message
+            whose window contains the current time is used; windows may wrap past midnight
+            (23:00 → 05:00). If no message in a rule fits, the default messages are used.</li>
+        </ul>
+      </section>
+    </main>
+    <script src="../common/config.js"></script>
+    <script src="options.js"></script>
+  </body>
+</html>

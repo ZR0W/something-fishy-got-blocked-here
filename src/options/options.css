@@ -1,0 +1,49 @@
+main { max-width: 48rem; margin: 0 auto; padding: 1.5rem 1rem 4rem; }
+section {
+  background: var(--sf-card);
+  border: 1px solid var(--sf-border);
+  border-radius: 12px;
+  padding: 1rem 1.25rem;
+  margin: 1rem 0;
+}
+h2 { margin: 0 0 0.5rem; font-size: 1.2rem; }
+h3 { margin: 1rem 0 0.5rem; font-size: 1rem; }
+input[type="text"], input[type="time"], textarea {
+  font: inherit;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--sf-border);
+  border-radius: 6px;
+  background: var(--sf-bg);
+  color: var(--sf-text);
+}
+textarea { width: 100%; min-height: 3.5rem; resize: vertical; }
+.sf-field { display: flex; gap: 0.5rem; align-items: center; margin: 0.4rem 0; }
+.sf-field input[type="text"] { flex: 1; min-width: 0; }
+.sf-check { display: block; margin: 0.4rem 0; }
+.sf-msg, .sf-rule {
+  border: 1px solid var(--sf-border);
+  border-radius: 8px;
+  padding: 0.6rem 0.75rem;
+  margin: 0.5rem 0;
+}
+.sf-rule { padding: 0.75rem 1rem; }
+.sf-msg-times, .sf-row { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin-top: 0.4rem; }
+.sf-row .sf-spacer { flex: 1; }
+.sf-invalid { outline: 2px solid #d14343; }
+.sf-savebar {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex-wrap: wrap;
+  padding: 0.75rem 0;
+  background: var(--sf-bg);
+}
+#status { font-size: 0.95rem; }
+#doh-warning button { margin-left: 0.5rem; }
+table { width: 100%; border-collapse: collapse; margin-bottom: 0.75rem; font-size: 0.95rem; }
+th, td { text-align: left; padding: 0.3rem 0.4rem; border-bottom: 1px solid var(--sf-border); }
+td.sf-host { word-break: break-all; }
+.sf-help ul { margin: 0; padding-left: 1.2rem; }
+code { font-size: 0.9em; }

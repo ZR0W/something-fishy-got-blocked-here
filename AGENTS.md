@@ -4,145 +4,151 @@ This document orients anyone (including automated coding agents) who opens this 
 
 ## Purpose
 
-**Something Fishy** is a personal, **Firefox-only** Manifest V3 Web Extension. When a top-level page fails to load **because the DNS resolver blocked it** (the owner's Pi-hole, which also passes through Cloudflare for Families blocks), it replaces Firefox's generic error page with a message page the owner writes ("encouraging discouragement"), optionally different per site and per time of day, with a local count of attempts.
+**Something Fishy** is a personal, **Firefox-only** Manifest V3 Web Extension. When a top-level page fails to load **because the DNS resolver blocked it** (the owner's Pi-hole, which also passes through Cloudflare for Families blocks), it replaces Firefox's generic error page with a message page the owner writes ("encouraging discouragement"), optionally per site and per time of day, with a local count of attempts.
 
-It is a **message layer, not the lock.** Pi-hole does the blocking; this extension only decorates the failure. It must never react to ordinary failures (typos/NXDOMAIN, sites that are down, being offline), and it must never offer a way past the block.
+It is a **message layer, not the lock.** Pi-hole does the blocking; this extension only decorates the failure. It never offers a way past the block.
 
 Human-facing overview: [README.md](README.md).
 
 ## Status
 
-**In progress, design blocked.** Done: pure logic (`src/common/`) with unit tests, dev tooling, icons, and a throwaway [diagnostic extension](tools/diagnostic/). The diagnostic run showed the browser sees DNS blocks and typos identically (see "Diagnostic findings"); a new detection method is being chosen with the owner.
+Feature-complete v0.1, **awaiting the owner's test pass on their PC** (README "Testing"). Signing (`npm run sign`) is set up but not yet run; the gecko id and name must be confirmed with the owner first (they're permanent on AMO).
 
 ## How it decides "blocked by my DNS"
 
-DNS answers carry **no reason code**, so the browser cannot know *who* blocked a name or *which rule* matched. The only signal is the shape of the answer:
+### What the network says vs. what Firefox sees
 
-| DNS answer | Meaning to us | Action |
-|---|---|---|
-| Every address is `0.0.0.0` or `::` | Blocked by my DNS (Pi-hole gravity/regex/own rules, or Cloudflare for Families passed through) | Show the message page |
-| NXDOMAIN (`dns.resolve` rejects) | Typo / non-existent name | Nothing (normal Firefox error) |
-| Any real address | Site down, refused, TLS error, … | Nothing |
-| Resolution fails entirely | Offline | Nothing |
+On the wire, Pi-hole answers a blocked name with `0.0.0.0` / `::`, and Cloudflare for Families blocks (forwarded by Pi-hole) look the same; a non-existent name gets NXDOMAIN. Verified on the owner's PC with `nslookup` and `Resolve-DnsName` (2026-10-21).
 
-> **Caveat:** the table describes the DNS answers on the wire. Firefox on Windows does **not** get to see them — see "Diagnostic findings".
+**But Firefox on Windows can't see that difference.** Windows' resolver (`getaddrinfo`, what Firefox's native resolver calls) drops the null records: for a blocked name it fails with *"The requested name is valid, but no data of the requested type was found"* (WSANO_DATA); for a non-existent name with *"No such host is known"* (WSAHOST_NOT_FOUND). Firefox collapses both into `NS_ERROR_UNKNOWN_HOST`, for the page load and for `browser.dns.resolve()` alike (with or without `bypass_cache`). Firefox's own resolver code (`netwerk/dns/`) doesn't filter null addresses — the loss is in Windows. No pref or API exposes the WSA error to extensions.
 
-Verified on the owner's PC (Windows, DNS pointed only at Pi-hole), 2026-10-21, with `nslookup`:
+### The rule (agreed with the owner, 2026-10-22)
 
-- `ad.doubleclick.net` (Pi-hole gravity) → `::` and `0.0.0.0`.
-- An adult site (Cloudflare for Families block, forwarded by Pi-hole) → `::` and `0.0.0.0`; the same name via `9.9.9.9` → a real address. So both blockers look identical to the browser.
-- `thisdomaindoesnotexist-12345.com` → NXDOMAIN.
+**Treat "unknown host" on a top-level page as blocked, as long as DNS otherwise works.** The owner rarely types URLs, so typos are rare; the message page says "almost always a block, occasionally a typo" and shows the hostname. This *relaxes* the original requirement that typos must never trigger it — deliberately.
 
-This depends on Pi-hole staying in its **default blocking mode** (null addresses). In `NXDOMAIN` or `NODATA` blocking modes, blocks are indistinguishable from typos and the extension would correctly stay silent but also never trigger.
+| Observation | Action |
+|---|---|
+| Main frame, error `NS_ERROR_UNKNOWN_HOST`, `dns.resolve` also says unknown host, canary (`example.com`) resolves, `navigator.onLine` | **Show the message page** |
+| `dns.resolve` returns only `0.0.0.0` / `::` (resolvers that pass them through, i.e. not Windows) | **Show the message page** |
+| Error is `NS_BINDING_ABORTED` or anything other than unknown host | Nothing |
+| Host resolves to real addresses (site down, refused, TLS…) | Nothing |
+| Canary fails, or `navigator.onLine` is false (offline / Pi-hole down) | Nothing |
+| Subframe (`frameId !== 0`), non-http(s), IP literal, `localhost` | Nothing |
 
-`isBlockedAnswer()` in [src/common/address.js](src/common/address.js) also accepts the long spellings of `::` (`0:0:…:0`, `::ffff:0.0.0.0`). An empty address list is **not** treated as blocked.
+The canary means a dead Pi-hole doesn't paint every site as "blocked". Pi-hole must keep its default blocking mode for the *non-Windows* path; on Windows any blocking mode ends up as unknown host.
+
+Rejected alternatives (see the owner discussion): asking a public DoH resolver whether the name exists (sends failed hostnames to Cloudflare, extra request); asking the Pi-hole v6 API (needs an app password + a LAN host permission). Either could be added later as an opt-in refinement — see Roadmap.
 
 ## Repository map
 
 | Path | Role |
 |------|------|
-| [src/common/address.js](src/common/address.js) | `SF_ADDRESS.isNullAddress / isBlockedAnswer` — the "is this a block answer" check. |
-| [src/common/url.js](src/common/url.js) | `SF_URL.candidateHost(url)` — returns the hostname to DNS-check, or `null` for URLs that must be ignored (non-http(s) schemes incl. `about:`/`moz-extension:`/`file:`, IP literals, `localhost`). |
-| [src/common/config.js](src/common/config.js) | `SF_CONFIG.DEFAULT_CONFIG` (shipped placeholder messages) and `normalizeConfig(raw)`, which repairs whatever is in storage. Storage key names. |
-| [src/common/rules.js](src/common/rules.js) | `SF_RULES` — hostname pattern matching, first-match rule lookup, time-of-day windows, `pickMessage`, `renderTemplate`. |
-| [tests/](tests/) | `node:test` unit tests for everything in `src/common/` (no browser needed). |
-| [tools/diagnostic/](tools/diagnostic/) | Throwaway logging-only extension used to verify Firefox's real behaviour on the owner's PC. Not shipped, never redirects. |
-| [web-ext-config.cjs](web-ext-config.cjs) | Keeps dev files out of the packaged extension. |
-| [icons/](icons/) | Toolbar/store icons. Regenerate with `python3 scripts/generate-icons.py` (`py scripts\generate-icons.py` on Windows) — stdlib-only PNG writer adapted from address-quick-display's. |
+| [manifest.json](manifest.json) | MV3, Firefox-only: `background.scripts` event page, `options_ui`, permissions `dns, webNavigation, tabs, storage`, no `host_permissions`. |
+| [src/background/background.js](src/background/background.js) | Listens to `webNavigation.onErrorOccurred`, runs the lookups, asks `SF_DECIDE`, counts the attempt, redirects with `loadReplace`. Records `isTRR` sightings. |
+| [src/blocked/blocked.html](src/blocked/blocked.html) / [.js](src/blocked/blocked.js) / [.css](src/blocked/blocked.css) | The message page: reads `?url=`, picks and renders the message, attempt count, **Go back** / **Close tab**, link to settings. No bypass. |
+| [src/options/options.html](src/options/options.html) / [.js](src/options/options.js) / [.css](src/options/options.css) | Settings: default title/messages, per-site rules (reorder, enable, time windows, preview), attempt table with reset, DoH warning. Refuses to save invalid input rather than dropping it. |
+| [src/common/decide.js](src/common/decide.js) | `SF_DECIDE.classifyError / shouldInvestigate / decide` — the redirect decision, pure. |
+| [src/common/address.js](src/common/address.js) | `SF_ADDRESS.isNullAddress / isBlockedAnswer` — `0.0.0.0` / `::` (any spelling). |
+| [src/common/url.js](src/common/url.js) | `SF_URL.candidateHost(url)` — hostname to check, or `null` for URLs to ignore. |
+| [src/common/config.js](src/common/config.js) | Storage keys, `DEFAULT_CONFIG` (placeholder wording), `normalizeConfig`, validation helpers. |
+| [src/common/rules.js](src/common/rules.js) | `SF_RULES` — pattern matching, first-match rules, time windows, `pickMessage`, `renderTemplate`. |
+| [src/common/attempts.js](src/common/attempts.js) | `SF_ATTEMPTS.recordAttempt` — per-host counter, capped at 500 hosts. |
+| [src/common/page.css](src/common/page.css) | Shared colours (light/dark) for the two pages. |
+| [tests/](tests/) | `node:test` unit tests for everything in `src/common/` (no browser). |
+| [tools/diagnostic/](tools/diagnostic/) | Throwaway logging-only extension used to establish the findings above. Not shipped; keep for re-checking after Firefox/Windows updates. |
+| [scripts/sign.local.example.ps1](scripts/sign.local.example.ps1) | Template for the git-ignored signing script holding AMO keys. |
+| [web-ext-config.cjs](web-ext-config.cjs) | Keeps dev files out of the package; DoH off in `web-ext run` profiles. |
+| [icons/](icons/) | Regenerate with `py scripts\generate-icons.py` (Windows) / `python3 scripts/generate-icons.py` — stdlib-only PNG writer adapted from address-quick-display's. |
 
-## Architecture (runtime, planned)
+## Architecture (runtime)
 
 ```mermaid
 flowchart LR
-  nav[main-frame navigation fails]
-  bg[background.js\nevent page]
-  dns[browser.dns.resolve]
-  page[blocked.html\nmessage page]
+  nav[main-frame load fails]
+  bg[background.js]
+  dns[dns.resolve host + canary]
+  page[blocked.html]
   ff[normal Firefox error page]
-  nav -- webNavigation.onErrorOccurred frameId 0 --> bg
-  bg --> dns
-  dns -- all 0.0.0.0 / :: --> page
-  dns -- NXDOMAIN / real IPs / offline --> ff
+  nav -- webNavigation.onErrorOccurred --> bg
+  bg -- unknown-host, frameId 0 --> dns
+  dns -- SF_DECIDE.decide: redirect --> page
+  dns -- otherwise --> ff
 ```
 
-1. `webNavigation.onErrorOccurred`, filtered to `http`/`https` (Firefox throws on an empty filter), **`frameId === 0` only**. Subframes, images, scripts and ad iframes fail all the time and must never hijack the tab.
-2. `SF_URL.candidateHost(url)`; ignore `null`.
-3. `dns.resolve(host)`; if `isTRR` is true, record it (DoH got turned back on — Pi-hole is being bypassed; options page warns).
-4. If `isBlockedAnswer(addresses)`: increment the local attempt counter, then check the tab still shows that URL (the user may have moved on), then `tabs.update(tabId, { url: blocked.html?url=…, loadReplace: true })`. `loadReplace` replaces the failed history entry so **Back** from the message page doesn't re-trigger the redirect.
-5. `blocked.html` reads the config, picks the message with `SF_RULES.pickMessage`, renders it with `textContent` only.
+1. `webNavigation.onErrorOccurred` with an `http`/`https` scheme filter (Firefox throws on an empty filter). `SF_DECIDE.shouldInvestigate`: `frameId === 0` and error is unknown host (or missing).
+2. `SF_URL.candidateHost(url)`; skip `null`. A per-`tabId|url` in-flight set prevents double handling.
+3. In parallel: `dns.resolve(host)` and `dns.resolve("example.com", ["bypass_cache"])`. Either `isTRR` → store `sfDohSeen`.
+4. `SF_DECIDE.decide({ host, canary, online: navigator.onLine })`.
+5. If redirecting: re-check `tabs.get(tabId).url === details.url` (user may have moved on); increment `sfAttempts[host]`; `tabs.update(tabId, { url: blocked.html?url=…, loadReplace: true })`. `loadReplace` replaces the failed history entry, so **Back** goes to the previous page rather than re-triggering.
+6. `blocked.html` reads config + attempts and renders with `textContent` only.
 
 ## Settings / storage schema
 
 | Area | Key | Meaning |
 |------|-----|---------|
-| `storage.local` | `sfConfig` | `{ version: 1, showCount, defaults: { title, messages[] }, rules[] }` — see below. Missing/invalid → `DEFAULT_CONFIG`. |
-| `storage.local` | `sfAttempts` | (planned) `{ [hostname]: { count, first, last } }`, ISO timestamps. Local only; resettable from the options page. |
+| `storage.local` | `sfConfig` | `{ version: 1, showCount, defaults: { title, messages[] }, rules[] }`. Absent until first Save — until then `DEFAULT_CONFIG` applies, so improved shipped defaults reach an unedited install. |
+| `storage.local` | `sfAttempts` | `{ [hostname]: { count, first, last } }`, ISO timestamps; capped at 500 hosts (least recently seen dropped). |
+| `storage.local` | `sfDohSeen` | ISO timestamp of the last lookup answered via DoH (TRR). Options page warns until dismissed. |
 
-- A **message** is `{ text, from?, to? }`. `from`/`to` are local `HH:MM`; the window is `[from, to)`, wraps past midnight when `from > to`, and `from === to` means all day. A message with only one of the two, or a malformed time, is dropped by `normalizeConfig` (rather than silently becoming all-day).
-- A **rule** is `{ pattern, path, enabled, title, messages[] }`. Pattern forms: `example.com` (domain + all subdomains), `=example.com` (exact host), `*.example.com` (subdomains only). `path` is an optional pathname prefix. Non-ASCII patterns are stored as punycode.
-- **Selection:** first enabled matching rule wins (options-page order = priority). Within the rule, the first message whose window contains "now"; if none, fall back to the default messages the same way. Title: rule title, else default title.
-- **Placeholders:** `{host}`, `{url}`, `{count}`, `{time}`. Unknown ones are left as typed.
+- **Message:** `{ text, from?, to? }`. `from`/`to` are local `HH:MM`; window `[from, to)`, wraps past midnight when `from > to`, `from === to` = all day. Both or neither.
+- **Rule:** `{ pattern, path, enabled, title, messages[] }`. Patterns: `example.com` (domain + subdomains), `=example.com` (exact), `*.example.com` (subdomains only). `path` = pathname prefix. Stored lowercase/punycode.
+- **Selection:** first enabled matching rule; within it the first message whose window contains now; else the default messages the same way. Title: rule title, else default title.
+- **Placeholders:** `{host}`, `{url}`, `{count}`, `{time}`; unknown ones are left as typed.
 
 ## Design decisions (with reasons)
 
-- **Firefox-only, MV3 event page.** `browser.dns` is Firefox-only, so unlike address-quick-display there is no Chromium `service_worker` entry and no `globalThis.browser ?? globalThis.chrome` shim — scripts use `browser` directly. MV3 chosen by the owner to match their other extensions; Firefox keeps MV2 alive, so this is consistency, not necessity.
-- **`strict_min_version: "142.0"`** (not 121 as in the owner's other repos): `web-ext lint` requires 140 (desktop) / 142 (Android) for `data_collection_permissions`.
-- **webNavigation, not webRequest, in the shipped extension.** Firefox's `webNavigation.onErrorOccurred` does not populate `details.error` (MDN browser-compat-data: `firefox: version_added: false`); only `webRequest.onErrorOccurred` has error strings, and that needs an `<all_urls>` host permission. The decision is made purely from DNS, so the error string isn't needed and the shipped extension keeps **no host permissions**. The diagnostic extension uses webRequest once to learn the strings.
-- **React to failures, don't pre-check.** The alternative (blocking `webRequest.onBeforeRequest` + `dns.resolve` on every navigation, MV2 only) adds a lookup to every page load and needs host permissions. Not worth it.
-- **No registrable-domain (eTLD+1) matching.** Firefox gives extensions no Public Suffix List API, and bundling the PSL (~250 KB, goes stale) isn't worth it for a personal rule list. The `example.com` = "domain + subdomains" form covers the practical need. Agreed with the owner.
-- **Pi-hole REST API lookup ("which list blocked this?"): not now.** Would need a Pi-hole app password stored in the extension and a host permission for a LAN address. Parked in the roadmap.
-- **Classic scripts, no build step** (same as the owner's other repos): `src/common/*.js` are IIFEs exposing one `SF_*` global each, so they load as `background.scripts` / `<script>` tags in the browser and via `require()` in Node tests.
-- **Dev tooling deviation:** the owner's other repos have no `package.json` or tests. This one adds a dev-only `package.json` (`web-ext` + Node's built-in test runner, no other dependencies) because it needs `web-ext sign`. Nothing from it is packaged.
+- **Firefox-only, MV3 event page.** `browser.dns` is Firefox-only, so (unlike the owner's other extensions) no Chromium `service_worker`, no `browser ?? chrome` shim. MV3 chosen by the owner for consistency; verified working in Firefox 158.
+- **`strict_min_version: "142.0"`** (owner's other repos: 121): `web-ext lint` requires 140/142 for `data_collection_permissions`.
+- **webNavigation, no webRequest, no host permissions.** Firefox 158 *does* fill `webNavigation` `details.error` (as `"Error code <decimal nsresult>"`; MDN compat data claiming otherwise is stale), so webRequest's `<all_urls>` permission isn't needed. `classifyError` also accepts symbolic names in case the format changes.
+- **Ignore `NS_BINDING_ABORTED`.** Seen in normal browsing: HTTPS-First aborts the `http://` attempt, and a normal page load (theverge.com) logged one while loading fine.
+- **React to failures, don't pre-check** every navigation (would need blocking webRequest + host permissions).
+- **No registrable-domain (eTLD+1) matching**: no Public Suffix List API in Firefox; `example.com` = "domain + subdomains" covers the need. Agreed with the owner.
+- **No config written on install**; the options page refuses to save invalid entries (lists the problems) instead of silently dropping them.
+- **Classic scripts, no build step** (owner's convention): each `src/common/*.js` is an IIFE exposing one `SF_*` global; load order in `manifest.json` / `<script>` tags matters (`address.js` before `decide.js`).
+- **Dev-tooling deviation:** a dev-only `package.json` (`web-ext` + Node's built-in test runner, nothing else) because signing needs `web-ext`. Nothing from it is packaged.
 
 ## How to run & test
 
-- `npm install` once (installs `web-ext` locally; Node ≥ 20).
-- `npm test` — unit tests, offline, no browser.
-- `npm run lint` — `web-ext lint` on the extension.
-- `npm start` — launches a throwaway Firefox profile with the extension loaded. Or `about:debugging#/runtime/this-firefox` → **Load Temporary Add-on…** → `manifest.json`.
-- Manual test matrix: see README "Testing".
-- **Test from the PC, never from the server:** the server's own DNS doesn't go through Pi-hole.
-- **Firefox DNS cache:** after allow/blocklisting in Pi-hole, Firefox may keep the old answer for a while (`about:networking#dns` → **Clear DNS Cache**).
+- `npm install` once (Node ≥ 20).
+- `npm test` — unit tests. `npm run lint` — `web-ext lint`. `npm start` — throwaway Firefox profile with the extension, DoH forced off.
+- Or `about:debugging#/runtime/this-firefox` → **Load Temporary Add-on…** → `manifest.json` in the owner's real profile.
+- Manual matrix: README "Testing". **Test from the PC, never the server** (the server's DNS bypasses Pi-hole).
+- Firefox caches DNS: `about:networking#dns` → **Clear DNS Cache** after Pi-hole changes. Windows caches too: `ipconfig /flushdns`.
 
 ### Debugging
 
-Prefix logs with `[something-fishy]`. Background console: `about:debugging` → the extension → **Inspect**.
+- Background console: `about:debugging` → Something Fishy → **Inspect**. Run `localStorage.setItem("sf_debug", "1")` there to log every decision (`[something-fishy]` prefix); `removeItem` to stop.
+- Re-check Firefox's behaviour after a Firefox/Windows update with `npm run diag` (see [tools/diagnostic/README.md](tools/diagnostic/README.md)).
 
-## Diagnostic findings (owner's PC, Firefox 158.0.1, Windows, 2026-10-21)
+## Diagnostic findings (owner's PC, Firefox 158.0.1, Windows, 2026-10-21/22)
 
-From the [diagnostic extension](tools/diagnostic/) run:
-
-- `browser.dns` exists and works under MV3; host permissions were granted to the temporary add-on.
-- **`dns.resolve()` rejects with `NS_ERROR_UNKNOWN_HOST` for Pi-hole-blocked (`ad.doubleclick.net`) and Cloudflare-blocked names — exactly the same as for a non-existent domain**, with or without `bypass_cache`, even though `nslookup` shows `0.0.0.0` / `::` for the blocked ones. So **the planned "all addresses are null" check can never fire on this setup.**
-  - Firefox's own resolver code (`netwerk/dns/`, checked in mozilla-central source) doesn't drop `0.0.0.0` answers; it fails when the OS resolver (`PR_GetAddrInfoByName`, i.e. Windows `getaddrinfo`) returns nothing. Hypothesis to verify: **Windows' resolver itself** turns all-null answers into "host not found" (`nslookup` bypasses that layer). If so, no Firefox pref changes it.
-- The page-load error is `NS_ERROR_UNKNOWN_HOST` in `webRequest.onErrorOccurred` for all three (blocked, blocked, typo).
-- **`webNavigation.onErrorOccurred` *does* populate `details.error` in Firefox 158** (MDN compat data says otherwise — stale), as `"Error code <decimal nsresult>"`: `2152398878` = `0x804B001E` = `NS_ERROR_UNKNOWN_HOST`, `2152398850` = `0x804B0002` = `NS_BINDING_ABORTED`.
-- `NS_BINDING_ABORTED` main-frame errors happen during normal browsing: HTTPS-First aborts the `http://` attempt before retrying `https://`, and theverge.com's main frame logged one while loading fine. **Must ignore aborted errors.**
-- Subframe failures (frameId ≠ 0) do occur on normal pages (a reCAPTCHA iframe on theverge.com) — confirms the main-frame-only rule.
-- While the error page is shown, `tabs.get().url` is the original URL and `status` is `complete`.
-- `isTRR: false` (DoH off) as expected.
-- Offline case: not yet run.
+- `browser.dns` works under MV3; `isTRR: false` with DoH off.
+- Blocked (gravity and Cloudflare) and non-existent names: page error and `dns.resolve` both `NS_ERROR_UNKNOWN_HOST`. `[System.Net.Dns]::GetHostAddresses` distinguishes them (WSANO_DATA vs WSAHOST_NOT_FOUND); `Resolve-DnsName` shows the `0.0.0.0`.
+- `webNavigation` error codes: `2152398878` = `0x804B001E` `NS_ERROR_UNKNOWN_HOST`; `2152398850` = `0x804B0002` `NS_BINDING_ABORTED`.
+- Subframe failures occur on normal pages (reCAPTCHA iframe).
+- While the error page is shown, `tabs.get().url` is the original URL, `status: "complete"`.
+- **Offline behaviour: not yet observed** — covered by the guard, confirm in the test pass.
 
 ## Constraints (do not regress without intent)
 
 - **No bypass.** No "continue anyway", nothing that weakens or routes around the DNS block.
-- **Permissions (planned):** `dns, webNavigation, tabs, storage`, **no `host_permissions`**.
-- **Privacy:** the only "network" activity is `dns.resolve` through Firefox's normal resolver. No analytics, no remote code, no other requests. Everything stored stays in `storage.local`.
-- **No LAN details in the repo:** no IPs, hostnames or IPv6 addresses of the owner's network. The extension doesn't need them.
-- **Main frame only;** never act on subframes. Never act on the extension's own pages (no redirect loops).
-- **Message text is plain text:** always `textContent`, never `innerHTML`, even though the owner writes it.
+- **Permissions:** `dns, webNavigation, tabs, storage`, **no `host_permissions`**. Changing this is a deliberate decision documented in README.
+- **Privacy:** the only network activity is `dns.resolve` (the failed host + the `example.com` canary) through Firefox's normal resolver, i.e. Pi-hole. No analytics, no remote code. Everything stays in `storage.local`.
+- **No LAN details in the repo** (IPs, hostnames, IPv6 addresses of the owner's network); the extension doesn't need them. **No secrets** (AMO keys live in env vars / git-ignored `*.local.ps1`).
+- **Main frame only;** never act on subframes or the extension's own pages.
+- **Plain text only:** message text goes in via `textContent`, never `innerHTML`.
 - **Don't touch Pi-hole, the server, or DNS settings** from this project.
 - **Payload:** no frameworks, no build step; `manifest.json` + `src/` + `icons/` load directly.
 
 ## Roadmap
 
-1. Choose a detection method that works given the diagnostic findings.
-2. Background script, blocked page, options page (rules editor, time windows, attempt counts + reset, DoH warning).
-3. Signing as an unlisted add-on via AMO (`npm run sign`), keys from environment variables.
-4. Optional, not started: Pi-hole v6 REST API lookup to say *which* list blocked a domain (needs an app password + LAN host permission; weigh with the owner first).
-5. Optional, not started: random rotation among several matching messages.
+1. Owner's test pass on the PC (README "Testing"), incl. the offline case.
+2. Confirm name + gecko id with the owner, then first `npm run sign` (unlisted).
+3. Optional, not started: an opt-in "is this really blocked?" refinement to stop typos showing the message — either a public DoH existence check (privacy cost: failed hostnames to the DoH provider) or the Pi-hole v6 API (app password + LAN host permission; would also say *which* list blocked it). Weigh with the owner first.
+4. Optional, not started: random rotation among several matching messages.
 
 ## Shipping
 
-- Bump `version` in `manifest.json`.
-- `npm run sign` (unlisted channel). Steps and credential handling: README "Signing".
+- Bump `version` in `manifest.json` (AMO signs each version number once).
+- `npm run sign` with AMO keys in the environment — README "Signing". The signed `.xpi` lands in `web-ext-artifacts/`.
+- Distribution is **personal, unlisted** (signed by AMO, not published in the store). Don't add listed/public publishing without asking the owner.

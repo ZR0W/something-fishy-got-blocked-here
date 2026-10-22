@@ -7,6 +7,7 @@
 
   const CONFIG_KEY = "sfConfig";
   const ATTEMPTS_KEY = "sfAttempts";
+  const DOH_SEEN_KEY = "sfDohSeen";
   const CLOCK = /^([01]\d|2[0-3]):[0-5]\d$/;
 
   // Placeholder wording ("encouraging discouragement") — edit on the options page.
@@ -42,23 +43,25 @@
     ],
   });
 
+  // Why a message would be dropped, or "" if it's fine. A half-specified or
+  // malformed window is rejected rather than silently widened to "all day"
+  // (that would show the 3 a.m. message at noon).
+  function messageProblem(m) {
+    if (!m || typeof m.text !== "string" || !m.text.trim()) return "empty message";
+    const hasFrom = m.from != null && m.from !== "";
+    const hasTo = m.to != null && m.to !== "";
+    if (!hasFrom && !hasTo) return "";
+    if (!CLOCK.test(String(m.from)) || !CLOCK.test(String(m.to))) {
+      return "time window needs both a start and an end (HH:MM)";
+    }
+    return "";
+  }
+
   function cleanMessages(list) {
     if (!Array.isArray(list)) return [];
-    const out = [];
-    for (const m of list) {
-      if (!m || typeof m.text !== "string" || !m.text.trim()) continue;
-      const hasFrom = m.from != null && m.from !== "";
-      const hasTo = m.to != null && m.to !== "";
-      if (hasFrom || hasTo) {
-        // A half-specified or malformed window is dropped rather than silently
-        // widened to "all day" (that would show the 3 a.m. message at noon).
-        if (!CLOCK.test(String(m.from)) || !CLOCK.test(String(m.to))) continue;
-        out.push({ from: m.from, to: m.to, text: m.text });
-      } else {
-        out.push({ text: m.text });
-      }
-    }
-    return out;
+    return list
+      .filter((m) => !messageProblem(m))
+      .map((m) => (m.from ? { from: m.from, to: m.to, text: m.text } : { text: m.text }));
   }
 
   // Lowercases, drops a trailing dot, and converts non-ASCII names to punycode
@@ -73,6 +76,10 @@
       return "";
     }
     return prefix + name;
+  }
+
+  function isValidPattern(cleaned) {
+    return /^(=|\*\.)?[a-z0-9-]+(\.[a-z0-9-]+)*$/.test(cleaned);
   }
 
   function normalizeConfig(raw) {
@@ -91,7 +98,7 @@
     const rules = [];
     for (const r of Array.isArray(raw.rules) ? raw.rules : []) {
       const pattern = cleanPattern(r?.pattern);
-      if (!/^(=|\*\.)?[a-z0-9-]+(\.[a-z0-9-]+)*$/.test(pattern)) continue;
+      if (!isValidPattern(pattern)) continue;
       const path = typeof r.path === "string" ? r.path.trim() : "";
       rules.push({
         pattern,
@@ -110,5 +117,14 @@
     };
   }
 
-  globalThis.SF_CONFIG = { CONFIG_KEY, ATTEMPTS_KEY, DEFAULT_CONFIG, normalizeConfig };
+  globalThis.SF_CONFIG = {
+    CONFIG_KEY,
+    ATTEMPTS_KEY,
+    DOH_SEEN_KEY,
+    DEFAULT_CONFIG,
+    normalizeConfig,
+    cleanPattern,
+    isValidPattern,
+    messageProblem,
+  };
 })();
