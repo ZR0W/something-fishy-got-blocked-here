@@ -8,6 +8,8 @@
   const CONFIG_KEY = "sfConfig";
   const ATTEMPTS_KEY = "sfAttempts";
   const DOH_SEEN_KEY = "sfDohSeen";
+  const DEBUG_KEY = "sfDebug";
+  const LOG_KEY = "sfDecisionLog";
   const CLOCK = /^([01]\d|2[0-3]):[0-5]\d$/;
 
   // Placeholder wording ("encouraging discouragement") — edit on the options page.
@@ -121,6 +123,8 @@
     CONFIG_KEY,
     ATTEMPTS_KEY,
     DOH_SEEN_KEY,
+    DEBUG_KEY,
+    LOG_KEY,
     DEFAULT_CONFIG,
     normalizeConfig,
     cleanPattern,

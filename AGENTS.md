@@ -12,7 +12,7 @@ Human-facing overview: [README.md](README.md).
 
 ## Status
 
-Feature-complete v0.1, **awaiting the owner's test pass on their PC** (README "Testing"). Signing (`npm run sign`) is set up but not yet run; the gecko id and name must be confirmed with the owner first (they're permanent on AMO).
+Feature-complete v0.1. First test pass done; **awaiting a re-test of the intermittent-skip fix** (see Diagnostic findings). Signing (`npm run sign`) is set up but not yet run; the gecko id and name must be confirmed with the owner first (they're permanent on AMO).
 
 ## How it decides "blocked by my DNS"
 
@@ -43,10 +43,10 @@ Rejected alternatives (see the owner discussion): asking a public DoH resolver w
 
 | Path | Role |
 |------|------|
-| [manifest.json](manifest.json) | MV3, Firefox-only: `background.scripts` event page, `options_ui`, permissions `dns, webNavigation, tabs, storage`, no `host_permissions`. |
-| [src/background/background.js](src/background/background.js) | Listens to `webNavigation.onErrorOccurred`, runs the lookups, asks `SF_DECIDE`, counts the attempt, redirects with `loadReplace`. Records `isTRR` sightings. |
+| [manifest.json](manifest.json) | MV3, Firefox-only: `background.scripts` event page, `options_ui`, permissions `dns, webNavigation, storage`, no `host_permissions`. |
+| [src/background/background.js](src/background/background.js) | Listens to `webNavigation.onErrorOccurred` (and `onBeforeNavigate` to know when a tab moved on), runs the lookups, asks `SF_DECIDE`, counts the attempt, redirects with `loadReplace`. Records `isTRR` sightings and, if enabled, a decision log. |
 | [src/blocked/blocked.html](src/blocked/blocked.html) / [.js](src/blocked/blocked.js) / [.css](src/blocked/blocked.css) | The message page: reads `?url=`, picks and renders the message, attempt count, **Go back** / **Close tab**, link to settings. No bypass. |
-| [src/options/options.html](src/options/options.html) / [.js](src/options/options.js) / [.css](src/options/options.css) | Settings: default title/messages, per-site rules (reorder, enable, time windows, preview), attempt table with reset, DoH warning. Refuses to save invalid input rather than dropping it. |
+| [src/options/options.html](src/options/options.html) / [.js](src/options/options.js) / [.css](src/options/options.css) | Settings: default title/messages, per-site rules (reorder, enable, time windows, preview), attempt table with reset, DoH warning, opt-in troubleshooting log. Refuses to save invalid input rather than dropping it. |
 | [src/common/decide.js](src/common/decide.js) | `SF_DECIDE.classifyError / shouldInvestigate / decide` — the redirect decision, pure. |
 | [src/common/address.js](src/common/address.js) | `SF_ADDRESS.isNullAddress / isBlockedAnswer` — `0.0.0.0` / `::` (any spelling). |
 | [src/common/url.js](src/common/url.js) | `SF_URL.candidateHost(url)` — hostname to check, or `null` for URLs to ignore. |
@@ -79,7 +79,7 @@ flowchart LR
 2. `SF_URL.candidateHost(url)`; skip `null`. A per-`tabId|url` in-flight set prevents double handling.
 3. In parallel: `dns.resolve(host)` and `dns.resolve("example.com", ["bypass_cache"])`. Either `isTRR` → store `sfDohSeen`.
 4. `SF_DECIDE.decide({ host, canary, online: navigator.onLine })`.
-5. If redirecting: re-check `tabs.get(tabId).url === details.url` (user may have moved on); increment `sfAttempts[host]`; `tabs.update(tabId, { url: blocked.html?url=…, loadReplace: true })`. `loadReplace` replaces the failed history entry, so **Back** goes to the previous page rather than re-triggering.
+5. If redirecting: skip if `onBeforeNavigate` saw a newer top-level navigation in that tab to a different URL (the user moved on). This deliberately does **not** compare `tab.url`: in the first test pass the redirect was intermittently skipped, most likely because `tab.url` hadn't switched to the failed URL yet when checked. Then increment `sfAttempts[host]`; `tabs.update(tabId, { url: blocked.html?url=…, loadReplace: true })`. `loadReplace` replaces the failed history entry, so **Back** goes to the previous page rather than re-triggering.
 6. `blocked.html` reads config + attempts and renders with `textContent` only.
 
 ## Settings / storage schema
@@ -89,6 +89,8 @@ flowchart LR
 | `storage.local` | `sfConfig` | `{ version: 1, showCount, defaults: { title, messages[] }, rules[] }`. Absent until first Save — until then `DEFAULT_CONFIG` applies, so improved shipped defaults reach an unedited install. |
 | `storage.local` | `sfAttempts` | `{ [hostname]: { count, first, last } }`, ISO timestamps; capped at 500 hosts (least recently seen dropped). |
 | `storage.local` | `sfDohSeen` | ISO timestamp of the last lookup answered via DoH (TRR). Options page warns until dismissed. |
+| `storage.local` | `sfDebug` | Boolean: troubleshooting log on (options page). Off by default. |
+| `storage.local` | `sfDecisionLog` | Last 50 `{ at, url, error, host, canary, online, reason, outcome }` records, main-frame errors only. Only written while `sfDebug` is on. |
 
 - **Message:** `{ text, from?, to? }`. `from`/`to` are local `HH:MM`; window `[from, to)`, wraps past midnight when `from > to`, `from === to` = all day. Both or neither.
 - **Rule:** `{ pattern, path, enabled, title, messages[] }`. Patterns: `example.com` (domain + subdomains), `=example.com` (exact), `*.example.com` (subdomains only). `path` = pathname prefix. Stored lowercase/punycode.
@@ -117,7 +119,8 @@ flowchart LR
 
 ### Debugging
 
-- Background console: `about:debugging` → Something Fishy → **Inspect**. Run `localStorage.setItem("sf_debug", "1")` there to log every decision (`[something-fishy]` prefix); `removeItem` to stop.
+- Easiest: options page → **Troubleshooting** → tick the checkbox, reproduce, **Copy log**. Each entry says why a main-frame failure was or wasn't replaced (`outcome`, `reason`).
+- Every decision is also logged at debug level in the background console (`about:debugging` → Something Fishy → **Inspect**, enable "Debug" level), `[something-fishy]` prefix.
 - Re-check Firefox's behaviour after a Firefox/Windows update with `npm run diag` (see [tools/diagnostic/README.md](tools/diagnostic/README.md)).
 
 ## Diagnostic findings (owner's PC, Firefox 158.0.1, Windows, 2026-10-21/22)
@@ -128,11 +131,12 @@ flowchart LR
 - Subframe failures occur on normal pages (reCAPTCHA iframe).
 - While the error page is shown, `tabs.get().url` is the original URL, `status: "complete"`.
 - **Offline behaviour: not yet observed** — covered by the guard, confirm in the test pass.
+- First test pass (2026-10-22): example.com, gravity block, typo (message shown, as agreed), ad-heavy page, Go back / Close tab, attempt counting all fine; the redirect was **intermittently skipped** (normal error page shown, incl. once for the Cloudflare-blocked site). Fixed by replacing the `tab.url` check (see Architecture step 5); awaiting re-test with the troubleshooting log on.
 
 ## Constraints (do not regress without intent)
 
 - **No bypass.** No "continue anyway", nothing that weakens or routes around the DNS block.
-- **Permissions:** `dns, webNavigation, tabs, storage`, **no `host_permissions`**. Changing this is a deliberate decision documented in README.
+- **Permissions:** `dns, webNavigation, storage`, **no `host_permissions`** (`tabs` was dropped once nothing read `tab.url`). Changing this is a deliberate decision documented in README.
 - **Privacy:** the only network activity is `dns.resolve` (the failed host + the `example.com` canary) through Firefox's normal resolver, i.e. Pi-hole. No analytics, no remote code. Everything stays in `storage.local`.
 - **No LAN details in the repo** (IPs, hostnames, IPv6 addresses of the owner's network); the extension doesn't need them. **No secrets** (AMO keys live in env vars / git-ignored `*.local.ps1`).
 - **Main frame only;** never act on subframes or the extension's own pages.

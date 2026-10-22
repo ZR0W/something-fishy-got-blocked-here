@@ -5,7 +5,7 @@
 "use strict";
 
 const $ = (id) => document.getElementById(id);
-const { CONFIG_KEY, ATTEMPTS_KEY, DOH_SEEN_KEY } = SF_CONFIG;
+const { CONFIG_KEY, ATTEMPTS_KEY, DOH_SEEN_KEY, DEBUG_KEY, LOG_KEY } = SF_CONFIG;
 const PREVIEW_URL = "https://blocked.example/";
 
 let state = null;
@@ -230,12 +230,19 @@ async function renderDohWarning() {
   if (seen) $("doh-when").textContent = new Date(seen).toLocaleString();
 }
 
+async function renderLog() {
+  const { [DEBUG_KEY]: on, [LOG_KEY]: list = [] } = await browser.storage.local.get([DEBUG_KEY, LOG_KEY]);
+  $("debug").checked = Boolean(on);
+  $("log").textContent = list.length ? JSON.stringify(list, null, 2) : "(empty)";
+}
+
 async function init() {
   const { [CONFIG_KEY]: stored } = await browser.storage.local.get(CONFIG_KEY);
   state = SF_CONFIG.normalizeConfig(stored);
   renderAll();
   renderAttempts();
   renderDohWarning();
+  renderLog();
 
   $("default-title").addEventListener("input", (e) => ((state.defaults.title = e.target.value), markDirty()));
   $("show-count").addEventListener("change", (e) => ((state.showCount = e.target.checked), markDirty()));
@@ -255,12 +262,19 @@ async function init() {
   $("reset-all").addEventListener("click", async () => {
     if (confirm("Reset all attempt counts?")) await browser.storage.local.remove(ATTEMPTS_KEY);
   });
+  $("debug").addEventListener("change", (e) => browser.storage.local.set({ [DEBUG_KEY]: e.target.checked }));
+  $("log-clear").addEventListener("click", () => browser.storage.local.remove(LOG_KEY));
+  $("log-copy").addEventListener("click", async () => {
+    await navigator.clipboard.writeText($("log").textContent);
+    setStatus("Log copied");
+  });
   $("doh-dismiss").addEventListener("click", () => browser.storage.local.remove(DOH_SEEN_KEY));
 
   browser.storage.onChanged.addListener((changes, area) => {
     if (area !== "local") return;
     if (ATTEMPTS_KEY in changes) renderAttempts();
     if (DOH_SEEN_KEY in changes) renderDohWarning();
+    if (LOG_KEY in changes || DEBUG_KEY in changes) renderLog();
   });
 }
 

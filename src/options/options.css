@@ -47,3 +47,4 @@ th, td { text-align: left; padding: 0.3rem 0.4rem; border-bottom: 1px solid var(
 td.sf-host { word-break: break-all; }
 .sf-help ul { margin: 0; padding-left: 1.2rem; }
 code { font-size: 0.9em; }
+.sf-log { max-height: 20rem; overflow: auto; font-size: 0.8rem; white-space: pre-wrap; word-break: break-all; background: var(--sf-bg); padding: 0.5rem; border-radius: 6px; }

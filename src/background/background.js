@@ -9,15 +9,26 @@
 const CANARY_HOST = "example.com";
 const BLOCKED_PAGE = "src/blocked/blocked.html";
 
+const LOG_MAX = 50;
+
 const inFlight = new Set();
+// tabId → { url, timeStamp } of the latest top-level navigation start. Lets us
+// tell whether the user moved on while we were looking things up, without
+// depending on when Firefox updates tab.url for the error page. Lost if the
+// event page unloads; then we just don't know, and proceed.
+const lastNavStart = new Map();
 let writeChain = Promise.resolve();
 
-function debug(...args) {
-  try {
-    if (localStorage.getItem("sf_debug") === "1") console.log("[something-fishy]", ...args);
-  } catch {
-    // no localStorage — no debug output
-  }
+// Records why a failed navigation was or wasn't redirected — to the console
+// always at debug level, and to storage when the options-page troubleshooting
+// log is switched on.
+async function record(entry) {
+  console.debug("[something-fishy]", entry);
+  const { [SF_CONFIG.DEBUG_KEY]: on } = await browser.storage.local.get(SF_CONFIG.DEBUG_KEY);
+  if (!on) return;
+  updateStorage(SF_CONFIG.LOG_KEY, (list) =>
+    [...(Array.isArray(list) ? list : []), { at: new Date().toISOString(), ...entry }].slice(-LOG_MAX)
+  );
 }
 
 async function lookup(host, flags = []) {
@@ -41,12 +52,14 @@ function updateStorage(key, fn) {
 }
 
 async function handleError(details) {
-  if (!SF_DECIDE.shouldInvestigate(details)) return;
+  if (details.frameId !== 0) return; // subframes: never act, not even log
+  const base = { url: details.url, error: details.error };
+  if (!SF_DECIDE.shouldInvestigate(details)) return record({ ...base, outcome: "skip: not unknown-host" });
   const host = SF_URL.candidateHost(details.url);
-  if (!host) return;
+  if (!host) return record({ ...base, outcome: "skip: ignored URL" });
 
   const key = `${details.tabId}|${details.url}`;
-  if (inFlight.has(key)) return;
+  if (inFlight.has(key)) return record({ ...base, outcome: "skip: already handling" });
   inFlight.add(key);
   try {
     const [hostResult, canary] = await Promise.all([
@@ -58,12 +71,14 @@ async function handleError(details) {
       updateStorage(SF_CONFIG.DOH_SEEN_KEY, () => new Date().toISOString());
     }
     const verdict = SF_DECIDE.decide({ host: hostResult, canary, online: navigator.onLine });
-    debug(details.url, details.error, hostResult, canary, verdict);
-    if (!verdict.redirect) return;
+    const facts = { ...base, host: hostResult, canary, online: navigator.onLine, reason: verdict.reason };
+    if (!verdict.redirect) return record({ ...facts, outcome: "skip: decided not blocked" });
 
-    // The user may have navigated elsewhere while we were looking things up.
-    const tab = await browser.tabs.get(details.tabId);
-    if (tab.url !== details.url) return;
+    // The user may have started another navigation in this tab meanwhile.
+    const latest = lastNavStart.get(details.tabId);
+    if (latest && latest.timeStamp > details.timeStamp && latest.url !== details.url) {
+      return record({ ...facts, outcome: `skip: tab moved on to ${latest.url}` });
+    }
 
     await updateStorage(SF_CONFIG.ATTEMPTS_KEY, (map) =>
       SF_ATTEMPTS.recordAttempt(map, host, new Date().toISOString())
@@ -72,14 +87,25 @@ async function handleError(details) {
     // loadReplace: the message page replaces the failed history entry, so Back
     // goes to the previous page instead of re-triggering the redirect.
     await browser.tabs.update(details.tabId, { url: target, loadReplace: true });
+    record({ ...facts, outcome: "redirected" });
   } catch (err) {
     console.error("[something-fishy] handling failed navigation", err);
+    record({ ...base, outcome: `error: ${err?.message ?? err}` });
   } finally {
     inFlight.delete(key);
   }
 }
 
-// Firefox throws on an empty filter; http(s) is all we care about anyway.
+// Firefox throws on an empty filter; http(s) is all we care about for errors.
 browser.webNavigation.onErrorOccurred.addListener(handleError, {
   url: [{ schemes: ["http", "https"] }],
 });
+
+browser.webNavigation.onBeforeNavigate.addListener(
+  (d) => {
+    if (d.frameId === 0) lastNavStart.set(d.tabId, { url: d.url, timeStamp: d.timeStamp });
+  },
+  { url: [{ urlMatches: ".*" }] }
+);
+
+browser.tabs.onRemoved.addListener((tabId) => lastNavStart.delete(tabId));

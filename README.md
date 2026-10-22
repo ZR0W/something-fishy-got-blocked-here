@@ -10,7 +10,7 @@ A small personal **Firefox** extension (Manifest V3). When a page won't load **b
 - Only top-level pages. Blocked ads/trackers inside normal pages keep failing silently.
 - Stays out of the way when DNS itself isn't working (offline, Pi-hole down) and for sites that are merely down — those keep Firefox's normal error page.
 - No network requests of its own beyond two DNS lookups through Firefox's normal resolver (the failed host, and `example.com` as a "does DNS work at all?" check). No analytics, no remote code. Settings and counts stay in this browser (`storage.local`).
-- Permissions: `dns`, `webNavigation`, `tabs`, `storage`. No access to page contents.
+- Permissions: `dns`, `webNavigation`, `storage`. No access to page contents.
 
 ## How it decides something was blocked
 
@@ -41,6 +41,10 @@ In `about:addons`, open Something Fishy's **⋯** menu → **Options**, or click
 - **Placeholders:** `{host}`, `{url}`, `{count}` (attempts at this host), `{time}`.
 - **Attempt counts** are listed on the same page, with per-site and global reset. Toggle the "Attempt #N" line with **Show the attempt count**.
 - **Preview** buttons open the message page with the *saved* settings. **Restore defaults** brings back the shipped placeholder wording.
+
+## Troubleshooting
+
+If a blocked site sometimes shows Firefox's normal error page instead of the message: settings page → **Troubleshooting** → tick **Record why each failed page was or wasn't replaced**, reproduce, then **Copy log**. Each entry has an `outcome` (e.g. `redirected`, `skip: decided not blocked`) and the DNS results behind it. The log stays in this browser; untick to stop recording, **Clear log** to delete it.
 
 ## Development setup (Windows / PowerShell)
 
