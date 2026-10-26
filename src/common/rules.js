@@ -1,6 +1,7 @@
-// Picks which message to show for a blocked URL: rule matching (hostname
-// pattern + optional path prefix), time-of-day windows, and {placeholder}
-// rendering. Pure functions only; callers pass in config and the clock.
+// Picks what to show for a blocked URL: rule matching (hostname pattern +
+// optional path prefix), time-of-day windows, a random pick among the entries
+// that fit, and {placeholder} rendering for message text and page URLs.
+// Pure functions only; callers pass in config, the clock and the random source.
 // Loaded as a classic script: exposes globalThis.SF_RULES.
 (() => {
   "use strict";
@@ -45,23 +46,42 @@
     return a < b ? now >= a && now < b : now >= a || now < b;
   }
 
-  // First message whose window contains `date` (untimed messages always match).
-  function firstMessage(messages, date) {
-    return messages.find((m) => !m.from || inWindow(m.from, m.to, date)) ?? null;
+  // Picks one entry index at random among those whose window contains `date`.
+  // If any *timed* entry fits, the pick is among those only, so a 23:00–05:00
+  // message reliably takes over at night instead of competing with all-day ones.
+  // `accept` can exclude kinds (the message page only renders "message" entries).
+  function chooseEntry(entries, date, rng, accept = () => true) {
+    const fitting = [];
+    entries.forEach((m, i) => {
+      if (accept(m) && (!m.from || inWindow(m.from, m.to, date))) fitting.push(i);
+    });
+    const timed = fitting.filter((i) => entries[i].from);
+    const pool = timed.length ? timed : fitting;
+    if (!pool.length) return -1;
+    return pool[Math.min(pool.length - 1, Math.floor(rng() * pool.length))];
   }
 
-  // Returns { title, text, ruleIndex } with text still a template. A matching rule
-  // with no message for this time of day falls back to the default messages.
-  function pickMessage(config, url, date) {
-    const ruleIndex = findRule(config.rules, url);
-    const rule = ruleIndex >= 0 ? config.rules[ruleIndex] : null;
-    const fromRule = rule ? firstMessage(rule.messages, date) : null;
-    const msg = fromRule ?? firstMessage(config.defaults.messages, date);
-    return {
-      title: (rule && rule.title) || config.defaults.title,
-      text: msg ? msg.text : "",
-      ruleIndex,
-    };
+  // Returns { title, entry, ruleIndex, entryIndex }, where entryIndex points into
+  // the matching rule's list (ruleIndex >= 0) or the default list (ruleIndex -1
+  // after a fallback). A matching rule with nothing for this time of day falls
+  // back to the default entries; entry is null only if nothing fits at all.
+  function pickEntry(config, url, date, rng = Math.random, accept) {
+    const matched = findRule(config.rules, url);
+    const rule = matched >= 0 ? config.rules[matched] : null;
+    const title = (rule && rule.title) || config.defaults.title;
+    if (rule) {
+      const i = chooseEntry(rule.messages, date, rng, accept);
+      if (i >= 0) return { title, entry: rule.messages[i], ruleIndex: matched, entryIndex: i };
+    }
+    const i = chooseEntry(config.defaults.messages, date, rng, accept);
+    return { title, entry: i >= 0 ? config.defaults.messages[i] : null, ruleIndex: -1, entryIndex: i };
+  }
+
+  // Looks up an entry by the indices pickEntry returned (passed to the message
+  // page in its URL). Returns null if the config changed and they're stale.
+  function entryAt(config, ruleIndex, entryIndex) {
+    const list = ruleIndex >= 0 ? config.rules[ruleIndex]?.messages : config.defaults.messages;
+    return list?.[entryIndex] ?? null;
   }
 
   // Replaces {host}, {url}, {count}, {time}; unknown placeholders are left as is.
@@ -72,5 +92,33 @@
     );
   }
 
-  globalThis.SF_RULES = { hostMatches, findRule, inWindow, pickMessage, renderTemplate };
+  // Fills a page-URL template. Placeholders {url}, {host}, {count}, {time} and
+  // LeechBlock's $U (= {url}) are URL-encoded, so they're safe in a query string.
+  // Returns the URL string, or null unless the result is a valid http(s) URL.
+  function renderUrl(template, vars) {
+    if (typeof template !== "string" || !template.trim()) return null;
+    const filled = template
+      .trim()
+      .replace(/\$U/g, "{url}")
+      .replace(/\{(host|url|count|time)\}/g, (whole, key) =>
+        vars[key] == null ? whole : encodeURIComponent(String(vars[key]))
+      );
+    try {
+      const u = new URL(filled);
+      return u.protocol === "http:" || u.protocol === "https:" ? u.href : null;
+    } catch {
+      return null;
+    }
+  }
+
+  globalThis.SF_RULES = {
+    hostMatches,
+    findRule,
+    inWindow,
+    chooseEntry,
+    pickEntry,
+    entryAt,
+    renderTemplate,
+    renderUrl,
+  };
 })();

@@ -30,11 +30,26 @@ async function render() {
     time: `${pad2(now.getHours())}:${pad2(now.getMinutes())}`,
   };
 
-  const picked = SF_RULES.pickMessage(config, blockedUrl, now);
-  const title = SF_RULES.renderTemplate(picked.title, vars);
-  document.title = title;
-  $("title").textContent = title;
-  $("message").textContent = SF_RULES.renderTemplate(picked.text, vars);
+  // The background passes the entry it picked (?r=<rule index>&e=<entry index>);
+  // the options page's per-entry Preview passes ?preview=1&title=&text=. With
+  // neither (or stale indices), pick a message here.
+  const params = new URLSearchParams(location.search);
+  const isMessage = (m) => Boolean(m) && (m.show ?? "message") === "message";
+  let title = SF_RULES.pickEntry(config, blockedUrl, now).title;
+  let text;
+  if (params.get("preview") === "1") {
+    title = params.get("title") || title;
+    text = params.get("text") ?? "";
+  } else {
+    const given = SF_RULES.entryAt(config, Number(params.get("r") ?? NaN), Number(params.get("e") ?? NaN));
+    text = isMessage(given)
+      ? given.text
+      : (SF_RULES.pickEntry(config, blockedUrl, now, Math.random, isMessage).entry?.text ?? "");
+  }
+  const shownTitle = SF_RULES.renderTemplate(title, vars);
+  document.title = shownTitle;
+  $("title").textContent = shownTitle;
+  $("message").textContent = SF_RULES.renderTemplate(text, vars);
   $("url").textContent = blockedUrl;
   $("host-inline").textContent = host;
 

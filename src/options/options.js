@@ -1,12 +1,14 @@
-// Options page: edits the config in storage.local (default title/messages,
-// per-site rules with time-of-day messages), shows/resets attempt counts, and
-// warns if DoH was seen. Edits mutate `state`; structural changes re-render.
+// Options page: edits the config in storage.local (default title and "what to
+// show" entries, per-site rules with time-of-day entries), shows/resets attempt
+// counts, and warns if DoH was seen. Edits mutate `state`; structural changes
+// re-render.
 // Built with createElement/textContent only.
 "use strict";
 
 const $ = (id) => document.getElementById(id);
 const { CONFIG_KEY, ATTEMPTS_KEY, DOH_SEEN_KEY, DEBUG_KEY, LOG_KEY } = SF_CONFIG;
 const PREVIEW_URL = "https://blocked.example/";
+const SHOW_KINDS_FOR_UI = SF_CONFIG.SHOW_KINDS;
 
 let state = null;
 
@@ -35,14 +37,81 @@ function move(list, i, delta) {
   [list[i], list[j]] = [list[j], list[i]];
 }
 
-function messageEditor(messages, rerender) {
+const SHOW_LABELS = {
+  message: "Message page",
+  page: "Web page (your URL)",
+  blank: "Blank page",
+  close: "Close the tab",
+};
+
+// Opens what an entry would show, using the unsaved values on screen.
+// `context()` returns { title, sampleUrl } for the list the entry belongs to.
+function previewEntry(m, context) {
+  const { title, sampleUrl } = context();
+  const show = m.show ?? "message";
+  const blocked = encodeURIComponent(sampleUrl);
+  if (show === "message") {
+    const q = new URLSearchParams({ url: sampleUrl, preview: "1", title, text: m.text ?? "" });
+    browser.tabs.create({ url: browser.runtime.getURL("src/blocked/blocked.html") + "?" + q });
+  } else if (show === "page") {
+    const host = new URL(sampleUrl).hostname;
+    const target = SF_RULES.renderUrl(m.url, { url: sampleUrl, host, count: 1, time: "12:00" });
+    if (target) browser.tabs.create({ url: target });
+    else setStatus("Preview: the page address must be a full http:// or https:// URL");
+  } else if (show === "blank") {
+    browser.tabs.create({ url: browser.runtime.getURL("src/blank/blank.html") + "?url=" + blocked });
+  } else {
+    setStatus("Preview: this entry closes the tab.");
+  }
+}
+
+// Order doesn't matter: one fitting entry is picked at random (timed ones first),
+// so there are no move buttons here.
+function entryEditor(entries, rerender, context) {
   const box = el("div");
-  messages.forEach((m, i) => {
-    const text = el("textarea", {
-      value: m.text,
-      placeholder: "Message text — {host}, {url}, {count}, {time} are filled in",
-      on: { input: (e) => ((m.text = e.target.value), markDirty()) },
-    });
+  entries.forEach((m, i) => {
+    const show = m.show ?? "message";
+    const kind = el(
+      "select",
+      {
+        on: {
+          change: (e) => {
+            m.show = e.target.value;
+            rerender();
+          },
+        },
+      },
+      SHOW_KINDS_FOR_UI.map((k) => el("option", { value: k, text: SHOW_LABELS[k], selected: k === show }))
+    );
+    let body;
+    if (show === "message") {
+      body = el("textarea", {
+        value: m.text ?? "",
+        placeholder: "Message text — {host}, {url}, {count}, {time} are filled in",
+        on: { input: (e) => ((m.text = e.target.value), markDirty()) },
+      });
+    } else if (show === "page") {
+      body = el("div", {}, [
+        el("input", {
+          type: "text",
+          className: "sf-url-input",
+          value: m.url ?? "",
+          placeholder: "https://example.com/todo?from={host}",
+          on: { input: (e) => ((m.url = e.target.value), markDirty()) },
+        }),
+        el("p", {
+          className: "sf-muted sf-hint",
+          text:
+            "{url} (or LeechBlock's $U), {host}, {count}, {time} are filled in, URL-encoded. " +
+            "Using {url}/{host} tells that site what was blocked.",
+        }),
+      ]);
+    } else {
+      body = el("p", {
+        className: "sf-muted sf-hint",
+        text: show === "blank" ? "Shows an empty page titled with the blocked site." : "Closes the tab (and the window, if it's the last tab).",
+      });
+    }
     const from = el("input", {
       type: "time",
       value: m.from ?? "",
@@ -55,7 +124,8 @@ function messageEditor(messages, rerender) {
     });
     box.append(
       el("div", { className: "sf-msg" }, [
-        text,
+        el("label", { className: "sf-field" }, ["Show", kind]),
+        body,
         el("div", { className: "sf-msg-times" }, [
           el("span", { className: "sf-muted", text: "Only between" }),
           from,
@@ -63,9 +133,8 @@ function messageEditor(messages, rerender) {
           to,
           el("span", { className: "sf-muted", text: "(empty = any time)" }),
           el("span", { className: "sf-spacer" }),
-          el("button", { type: "button", text: "↑", title: "Move up", on: { click: () => (move(messages, i, -1), rerender()) } }),
-          el("button", { type: "button", text: "↓", title: "Move down", on: { click: () => (move(messages, i, 1), rerender()) } }),
-          el("button", { type: "button", text: "Remove", on: { click: () => (messages.splice(i, 1), rerender()) } }),
+          el("button", { type: "button", text: "Preview", on: { click: () => previewEntry(m, context) } }),
+          el("button", { type: "button", text: "Remove", on: { click: () => (entries.splice(i, 1), rerender()) } }),
         ]),
       ])
     );
@@ -73,8 +142,8 @@ function messageEditor(messages, rerender) {
   box.append(
     el("button", {
       type: "button",
-      text: "+ Add message",
-      on: { click: () => (messages.push({ text: "" }), rerender()) },
+      text: "+ Add entry",
+      on: { click: () => (entries.push({ text: "" }), rerender()) },
     })
   );
   return box;
@@ -126,7 +195,10 @@ function renderRules() {
             on: { input: (e) => ((r.title = e.target.value), markDirty()) },
           }),
         ]),
-        messageEditor(r.messages, rerender),
+        entryEditor(r.messages, rerender, () => ({
+          title: r.title || state.defaults.title,
+          sampleUrl: previewUrlForRule(r),
+        })),
         el("div", { className: "sf-row" }, [
           el("label", {}, [
             el("input", {
@@ -137,7 +209,12 @@ function renderRules() {
             " Enabled",
           ]),
           el("span", { className: "sf-spacer" }),
-          el("button", { type: "button", text: "Preview", on: { click: () => openPreview(previewUrlForRule(r)) } }),
+          el("button", {
+            type: "button",
+            text: "Preview (saved)",
+            title: "Opens the message page for this site using the saved settings",
+            on: { click: () => openPreview(previewUrlForRule(r)) },
+          }),
           el("button", { type: "button", text: "↑", title: "Move up", on: { click: () => (move(state.rules, i, -1), rerender()) } }),
           el("button", { type: "button", text: "↓", title: "Move down", on: { click: () => (move(state.rules, i, 1), rerender()) } }),
           el("button", { type: "button", text: "Delete rule", on: { click: () => (state.rules.splice(i, 1), rerender()) } }),
@@ -151,7 +228,9 @@ function renderDefaults() {
   $("default-title").value = state.defaults.title;
   $("show-count").checked = state.showCount;
   const rerender = () => (markDirty(), renderDefaults());
-  $("default-messages").replaceChildren(messageEditor(state.defaults.messages, rerender));
+  $("default-messages").replaceChildren(
+    entryEditor(state.defaults.messages, rerender, () => ({ title: state.defaults.title, sampleUrl: PREVIEW_URL }))
+  );
 }
 
 function renderAll() {
@@ -166,9 +245,9 @@ function problems() {
   const checkMessages = (list, where) =>
     list.forEach((m, i) => {
       const p = SF_CONFIG.messageProblem(m);
-      if (p) out.push(`${where}, message ${i + 1}: ${p}`);
+      if (p) out.push(`${where}, entry ${i + 1}: ${p}`);
     });
-  if (!state.defaults.messages.length) out.push("Default: needs at least one message");
+  if (!state.defaults.messages.length) out.push("Default: needs at least one entry");
   checkMessages(state.defaults.messages, "Default");
   state.rules.forEach((r, i) => {
     const where = `Rule ${i + 1}${r.pattern ? ` (${r.pattern})` : ""}`;

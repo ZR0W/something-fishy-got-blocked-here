@@ -3,8 +3,13 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 require("../src/common/config.js");
 require("../src/common/rules.js");
-const { normalizeConfig, DEFAULT_CONFIG } = globalThis.SF_CONFIG;
-const { hostMatches, findRule, inWindow, pickMessage, renderTemplate } = globalThis.SF_RULES;
+const { normalizeConfig, DEFAULT_CONFIG, messageProblem } = globalThis.SF_CONFIG;
+const { hostMatches, findRule, inWindow, chooseEntry, pickEntry, entryAt, renderTemplate, renderUrl } =
+  globalThis.SF_RULES;
+
+// Deterministic "random": always picks the first / last of the pool.
+const first = () => 0;
+const last = () => 0.999999;
 
 const at = (hh, mm = 0) => new Date(2026, 9, 21, hh, mm);
 
@@ -42,31 +47,95 @@ test("time windows, including wrap past midnight", () => {
   assert.equal(inWindow("00:00", "00:00", at(13)), true);
 });
 
-test("pickMessage: default messages by time of day", () => {
+test("pickEntry: default entries by time of day", () => {
   const cfg = normalizeConfig(DEFAULT_CONFIG);
-  assert.match(pickMessage(cfg, "https://x.test/", at(2)).text, /late/);
-  assert.match(pickMessage(cfg, "https://x.test/", at(7)).text, /morning/);
-  assert.match(pickMessage(cfg, "https://x.test/", at(14)).text, /caught in the net/);
-  assert.equal(pickMessage(cfg, "https://x.test/", at(14)).ruleIndex, -1);
+  assert.match(pickEntry(cfg, "https://x.test/", at(2), last).entry.text, /late/);
+  assert.match(pickEntry(cfg, "https://x.test/", at(7), last).entry.text, /morning/);
+  assert.match(pickEntry(cfg, "https://x.test/", at(14), last).entry.text, /caught in the net/);
+  assert.equal(pickEntry(cfg, "https://x.test/", at(14)).ruleIndex, -1);
 });
 
-test("pickMessage: rule message and title, falling back to defaults by time", () => {
+test("pickEntry: rule entry and title, falling back to defaults by time", () => {
   const cfg = normalizeConfig({
     defaults: { title: "D", messages: [{ text: "default" }] },
     rules: [
       { pattern: "a.test", title: "A", messages: [{ from: "09:00", to: "17:00", text: "work" }] },
     ],
   });
-  assert.deepEqual(pickMessage(cfg, "https://www.a.test/", at(10)), {
+  assert.deepEqual(pickEntry(cfg, "https://www.a.test/", at(10)), {
     title: "A",
-    text: "work",
+    entry: { from: "09:00", to: "17:00", text: "work" },
     ruleIndex: 0,
+    entryIndex: 0,
   });
-  assert.deepEqual(pickMessage(cfg, "https://www.a.test/", at(20)), {
+  assert.deepEqual(pickEntry(cfg, "https://www.a.test/", at(20)), {
     title: "A",
-    text: "default",
-    ruleIndex: 0,
+    entry: { text: "default" },
+    ruleIndex: -1,
+    entryIndex: 0,
   });
+  assert.deepEqual(entryAt(cfg, 0, 0), { from: "09:00", to: "17:00", text: "work" });
+  assert.equal(entryAt(cfg, 5, 0), null);
+});
+
+test("chooseEntry: random among fitting entries; timed ones take precedence", () => {
+  const entries = [
+    { text: "a" },
+    { show: "page", url: "https://todo.example/" },
+    { from: "23:00", to: "05:00", text: "night" },
+    { from: "23:00", to: "05:00", show: "close" },
+  ];
+  assert.equal(chooseEntry(entries, at(12), first), 0);
+  assert.equal(chooseEntry(entries, at(12), last), 1);
+  assert.equal(chooseEntry(entries, at(2), first), 2);
+  assert.equal(chooseEntry(entries, at(2), last), 3);
+  const counts = [0, 0];
+  for (let i = 0; i < 1000; i++) counts[chooseEntry(entries, at(12), Math.random)]++;
+  assert.ok(counts[0] > 350 && counts[1] > 350, `roughly even: ${counts}`);
+  // The message page only renders messages: filter by kind.
+  const onlyMessages = (m) => (m.show ?? "message") === "message";
+  assert.equal(chooseEntry(entries, at(2), last, onlyMessages), 2);
+  assert.equal(chooseEntry([{ show: "close" }], at(2), first, onlyMessages), -1);
+});
+
+test("renderUrl: placeholders are URL-encoded; LeechBlock $U works; only http(s)", () => {
+  const vars = { url: "https://x.test/a?b=1&c=2", host: "x.test", count: 3, time: "02:00" };
+  assert.equal(
+    renderUrl("https://todo.example/?from={host}&n={count}", vars),
+    "https://todo.example/?from=x.test&n=3"
+  );
+  assert.equal(
+    renderUrl("https://todo.example/?u=$U", vars),
+    "https://todo.example/?u=https%3A%2F%2Fx.test%2Fa%3Fb%3D1%26c%3D2"
+  );
+  assert.equal(renderUrl("https://todo.example/", vars), "https://todo.example/");
+  assert.equal(renderUrl("file:///C:/notes.html", vars), null);
+  assert.equal(renderUrl("javascript:alert(1)", vars), null);
+  assert.equal(renderUrl("todo.example", vars), null);
+  assert.equal(renderUrl("", vars), null);
+});
+
+test("entry validation and cleanup per kind", () => {
+  assert.equal(messageProblem({ text: "hi" }), "");
+  assert.equal(messageProblem({ show: "page", url: "https://todo.example/?u=$U" }), "");
+  assert.match(messageProblem({ show: "page", url: "todo.example" }), /http/);
+  assert.equal(messageProblem({ show: "blank" }), "");
+  assert.equal(messageProblem({ show: "close", from: "22:00", to: "06:00" }), "");
+  assert.match(messageProblem({ show: "teleport" }), /unknown kind/);
+  const cfg = normalizeConfig({
+    defaults: {
+      messages: [
+        { show: "message", text: "hi", url: "ignored" },
+        { show: "page", url: " https://todo.example/ ", text: "ignored" },
+        { show: "blank", from: "22:00", to: "06:00" },
+      ],
+    },
+  });
+  assert.deepEqual(cfg.defaults.messages, [
+    { text: "hi" },
+    { show: "page", url: "https://todo.example/" },
+    { show: "blank", from: "22:00", to: "06:00" },
+  ]);
 });
 
 test("renderTemplate", () => {

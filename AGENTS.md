@@ -45,13 +45,14 @@ Rejected alternatives (see the owner discussion): asking a public DoH resolver w
 |------|------|
 | [manifest.json](manifest.json) | MV3, Firefox-only: `background.scripts` event page, `options_ui`, permissions `dns, webNavigation, storage`, no `host_permissions`. |
 | [src/background/background.js](src/background/background.js) | Listens to `webNavigation.onErrorOccurred` (and `onBeforeNavigate` to know when a tab moved on), runs the lookups, asks `SF_DECIDE`, counts the attempt, redirects with `loadReplace`. Records `isTRR` sightings and, if enabled, a decision log. |
-| [src/blocked/blocked.html](src/blocked/blocked.html) / [.js](src/blocked/blocked.js) / [.css](src/blocked/blocked.css) | The message page: reads `?url=`, picks and renders the message, attempt count, **Go back** / **Close tab**, link to settings. No bypass. |
+| [src/blocked/blocked.html](src/blocked/blocked.html) / [.js](src/blocked/blocked.js) / [.css](src/blocked/blocked.css) | The message page: reads `?url=` and the entry the background picked (`&r=<rule>&e=<entry>`; options preview uses `&preview=1&title=&text=`), renders it with the attempt count, **Go back** / **Close tab**, link to settings. No bypass. |
+| [src/blank/blank.html](src/blank/blank.html) / [.js](src/blank/blank.js) | Shipped "blank page" destination; only sets the tab title. |
 | [src/options/options.html](src/options/options.html) / [.js](src/options/options.js) / [.css](src/options/options.css) | Settings: default title/messages, per-site rules (reorder, enable, time windows, preview), attempt table with reset, DoH warning, opt-in troubleshooting log. Refuses to save invalid input rather than dropping it. |
 | [src/common/decide.js](src/common/decide.js) | `SF_DECIDE.classifyError / shouldInvestigate / decide` — the redirect decision, pure. |
 | [src/common/address.js](src/common/address.js) | `SF_ADDRESS.isNullAddress / isBlockedAnswer` — `0.0.0.0` / `::` (any spelling). |
 | [src/common/url.js](src/common/url.js) | `SF_URL.candidateHost(url)` — hostname to check, or `null` for URLs to ignore. |
 | [src/common/config.js](src/common/config.js) | Storage keys, `DEFAULT_CONFIG` (placeholder wording), `normalizeConfig`, validation helpers. |
-| [src/common/rules.js](src/common/rules.js) | `SF_RULES` — pattern matching, first-match rules, time windows, `pickMessage`, `renderTemplate`. |
+| [src/common/rules.js](src/common/rules.js) | `SF_RULES` — pattern matching, first-match rules, time windows, random `chooseEntry` / `pickEntry`, `renderTemplate` (text), `renderUrl` (page addresses). |
 | [src/common/attempts.js](src/common/attempts.js) | `SF_ATTEMPTS.recordAttempt` — per-host counter, capped at 500 hosts. |
 | [src/common/page.css](src/common/page.css) | Shared colours (light/dark) for the two pages. |
 | [tests/](tests/) | `node:test` unit tests for everything in `src/common/` (no browser). |
@@ -80,7 +81,9 @@ flowchart LR
 3. In parallel: `dns.resolve(host)` and `dns.resolve("example.com", ["bypass_cache"])`. Either `isTRR` → store `sfDohSeen`.
 4. `SF_DECIDE.decide({ host, canary, online: navigator.onLine })`.
 5. If redirecting: skip if `onBeforeNavigate` saw a newer top-level navigation in that tab to a different URL (the user moved on). This deliberately does **not** compare `tab.url`: in the first test pass the redirect was intermittently skipped, most likely because `tab.url` hadn't switched to the failed URL yet when checked. Then increment `sfAttempts[host]`; `tabs.update(tabId, { url: blocked.html?url=…, loadReplace: true })`. `loadReplace` replaces the failed history entry, so **Back** goes to the previous page rather than re-triggering.
-6. `blocked.html` reads config + attempts and renders with `textContent` only.
+6. Pick what to show: `SF_RULES.pickEntry` (random among fitting entries, see schema). Then by `show`: **message** → `blocked.html?url=…&r=…&e=…`; **page** → `SF_RULES.renderUrl(template)`; **blank** → `blank.html?url=…`; **close** → `tabs.remove`. All navigations use `loadReplace`.
+7. Loop guard: if the tab's custom page fails the same way within 5 s (its host is blocked too), show the message page for the original URL instead, without counting again.
+8. `blocked.html` reads config + attempts and renders with `textContent` only.
 
 ## Settings / storage schema
 
@@ -92,10 +95,10 @@ flowchart LR
 | `storage.local` | `sfDebug` | Boolean: troubleshooting log on (options page). Off by default. |
 | `storage.local` | `sfDecisionLog` | Last 50 `{ at, url, error, host, canary, online, reason, outcome }` records, main-frame errors only. Only written while `sfDebug` is on. |
 
-- **Message:** `{ text, from?, to? }`. `from`/`to` are local `HH:MM`; window `[from, to)`, wraps past midnight when `from > to`, `from === to` = all day. Both or neither.
+- **Entry** (stored in `messages[]`; the key kept its v1 name so old configs load unchanged): `{ show?, text?, url?, from?, to? }`. `show` is `"message"` (default when absent; needs `text`), `"page"` (needs `url`, a template that must render to http(s)), `"blank"` or `"close"`. `from`/`to` are local `HH:MM`; window `[from, to)`, wraps past midnight when `from > to`, `from === to` = all day. Both or neither.
 - **Rule:** `{ pattern, path, enabled, title, messages[] }`. Patterns: `example.com` (domain + subdomains), `=example.com` (exact), `*.example.com` (subdomains only). `path` = pathname prefix. Stored lowercase/punycode.
-- **Selection:** first enabled matching rule; within it the first message whose window contains now; else the default messages the same way. Title: rule title, else default title.
-- **Placeholders:** `{host}`, `{url}`, `{count}`, `{time}`; unknown ones are left as typed.
+- **Selection:** first enabled matching rule; within it, a **random** entry among those whose window contains now — but if any *timed* entry fits, only among those (so a night message reliably takes over at night). Nothing fits → the default entries the same way. Title: rule title, else default title. (Before 2026-10-26: first fitting message, no randomness.)
+- **Placeholders:** `{host}`, `{url}`, `{count}`, `{time}`; unknown ones are left as typed. In page URLs they're URL-encoded, and LeechBlock's `$U` is accepted as `{url}` (LeechBlock NG's "page to show instead" substitutes `$U`/`$S`/`$K`; checked in its `background.js`).
 
 ## Design decisions (with reasons)
 
@@ -105,6 +108,8 @@ flowchart LR
 - **Ignore `NS_BINDING_ABORTED`.** Seen in normal browsing: HTTPS-First aborts the `http://` attempt, and a normal page load (theverge.com) logged one while loading fine.
 - **React to failures, don't pre-check** every navigation (would need blocking webRequest + host permissions).
 - **No registrable-domain (eTLD+1) matching**: no Public Suffix List API in Firefox; `example.com` = "domain + subdomains" covers the need. Agreed with the owner.
+- **"Show instead" pages, after LeechBlock** (owner request, 2026-10-26): a custom URL with `$U`-style substitution, or shipped pages (message, blank), or close the tab. Not taken from LeechBlock: delaying/password pages and time limits (they exist to let you through; there's no bypass here), and blocking from the extension's own list (it's a message layer, not a lock).
+- **Custom pages must be http(s).** Firefox doesn't let extensions navigate tabs to `file:` URLs, and `javascript:`/`data:` are refused by `renderUrl`.
 - **No config written on install**; the options page refuses to save invalid entries (lists the problems) instead of silently dropping them.
 - **Classic scripts, no build step** (owner's convention): each `src/common/*.js` is an IIFE exposing one `SF_*` global; load order in `manifest.json` / `<script>` tags matters (`address.js` before `decide.js`).
 - **Dev-tooling deviation:** a dev-only `package.json` (`web-ext` + Node's built-in test runner, nothing else) because signing needs `web-ext`. Nothing from it is packaged.
@@ -149,7 +154,7 @@ flowchart LR
 1. Offline case (cable unplugged → normal Firefox error) still to be observed.
 2. Confirm name + gecko id with the owner, then first `npm run sign` (unlisted).
 3. Optional, not started: an opt-in "is this really blocked?" refinement to stop typos showing the message — either a public DoH existence check (privacy cost: failed hostnames to the DoH provider) or the Pi-hole v6 API (app password + LAN host permission; would also say *which* list blocked it). Weigh with the owner first.
-4. Optional, not started: random rotation among several matching messages.
+4. Considered with the owner (LeechBlock comparison, 2026-10-26), not started: named sets with multi-line site lists, `+` exceptions and path-in-line, days of the week, strict mode (only listed sites), export/import of settings.
 
 ## Shipping
 

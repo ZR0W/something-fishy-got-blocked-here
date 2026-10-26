@@ -21,6 +21,7 @@
       "src/common/address.js",
       "src/common/url.js",
       "src/common/config.js",
+      "src/common/rules.js",
       "src/common/attempts.js",
       "src/common/decide.js",
       "src/background/background.js"

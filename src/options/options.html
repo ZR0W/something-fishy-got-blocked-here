@@ -27,7 +27,11 @@
         <h2>Default</h2>
         <label class="sf-field">Title <input id="default-title" type="text" /></label>
         <label class="sf-check"><input id="show-count" type="checkbox" /> Show the attempt count</label>
-        <h3>Messages</h3>
+        <h3>What to show</h3>
+        <p class="sf-muted">
+          One entry that fits the current time is picked at random each time. Entries with a time window
+          take over while their window is open.
+        </p>
         <div id="default-messages"></div>
       </section>
 
@@ -78,13 +82,19 @@
             Optional <b>path</b> is a prefix, e.g. <code>/r/news</code>.</li>
           <li><b>Placeholders:</b> <code>{host}</code>, <code>{url}</code>, <code>{count}</code>,
             <code>{time}</code>.</li>
-          <li><b>Time of day:</b> leave both times empty for "any time", or set both. The first message
-            whose window contains the current time is used; windows may wrap past midnight
-            (23:00 → 05:00). If no message in a rule fits, the default messages are used.</li>
+          <li><b>What to show:</b> each entry is a <b>message page</b>, a <b>web page</b> of your choice
+            (placeholders in its address are URL-encoded; LeechBlock's <code>$U</code> works too), a
+            <b>blank page</b>, or <b>close the tab</b>. If your web page is blocked as well, the message page
+            is shown instead.</li>
+          <li><b>Time of day:</b> leave both times empty for "any time", or set both; windows may wrap past
+            midnight (23:00 → 05:00). Each time, one entry is picked at random among those that fit, and
+            entries with a time window win while it's open. If nothing in a rule fits, the default entries
+            are used.</li>
         </ul>
       </section>
     </main>
     <script src="../common/config.js"></script>
+    <script src="../common/rules.js"></script>
     <script src="options.js"></script>
   </body>
 </html>

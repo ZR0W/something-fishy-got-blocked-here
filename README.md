@@ -31,16 +31,21 @@ DNS also carries **no reason code**, so the extension can't tell a Pi-hole block
 
 In `about:addons`, open Something Fishy's **⋯** menu → **Options**, or click **Edit messages** on the message page.
 
-- **Default** title and messages, used when no rule matches.
+- **Default** title and entries, used when no rule matches.
 - **Per-site rules**, top to bottom, first match wins. Site patterns:
   - `reddit.com` — the domain and all subdomains (`www.reddit.com`, `old.reddit.com`)
   - `=reddit.com` — exactly that host
   - `*.reddit.com` — subdomains only
   - optional **path** prefix, e.g. `/r/news`
-- **Time of day:** give a message a start and end time (e.g. 23:00 → 05:00, wrapping past midnight). The first message whose window fits now is used; messages without times always fit. If none in a rule fits, the default messages are used.
-- **Placeholders:** `{host}`, `{url}`, `{count}` (attempts at this host), `{time}`.
+- **What to show:** each entry is one of
+  - **Message page**: the extension's page with your text, attempt count, Go back / Close tab;
+  - **Web page**: any `http(s)://` address you choose, e.g. a to-do list. Like LeechBlock's "page to show instead"; `{url}`, `{host}`, `{count}`, `{time}` and LeechBlock's `$U` in the address are filled in, URL-encoded (`https://example.com/todo?from={host}`). Putting `{url}`/`{host}` in it tells that site what was blocked. If that page is blocked by your DNS too, the message page is shown instead;
+  - **Blank page**: an empty page, tab titled "Blocked: <site>";
+  - **Close the tab** (closes the window if it was the last tab).
+- **Random pick, time of day:** each time, one entry is picked at random among those that fit the current time. Give an entry a start and end time (e.g. 23:00 → 05:00, wrapping past midnight) and it takes over while its window is open: if any timed entry fits, the pick is among those only. Entries without times fit any time. If nothing in a rule fits, the default entries are used.
+- **Placeholders** in message text and titles: `{host}`, `{url}`, `{count}` (attempts at this host), `{time}`.
 - **Attempt counts** are listed on the same page, with per-site and global reset. Toggle the "Attempt #N" line with **Show the attempt count**.
-- **Preview** buttons open the message page with the *saved* settings. **Restore defaults** brings back the shipped placeholder wording.
+- **Preview** on an entry shows that entry as currently typed; **Preview (saved)** shows a random pick from the saved settings. **Restore defaults** brings back the shipped placeholder wording.
 
 ## Troubleshooting
 
@@ -69,6 +74,7 @@ Test from the PC, never from the server (the server's own DNS doesn't go through
 |---|---|
 | `https://example.com/` | Loads normally |
 | `https://ad.doubleclick.net/` | Message page (rule: "Just an ad server") |
+| a blocked site with a **Web page** / **Blank page** / **Close the tab** entry | That page, blank page, or the tab closes; Back returns to the previous page |
 | a known adult site (Cloudflare for Families block) | Message page (default message for the time of day) |
 | `https://thisdomaindoesnotexist-12345.com/` | Message page too — known, accepted limitation |
 | a normal page with ads (e.g. a news site) | Loads normally, no redirect |

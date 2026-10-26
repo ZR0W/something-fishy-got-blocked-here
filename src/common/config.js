@@ -45,11 +45,25 @@
     ],
   });
 
-  // Why a message would be dropped, or "" if it's fine. A half-specified or
+  // An entry in a messages[] list says what to show for a block. `show` is
+  // "message" (default when absent, so v1 configs load unchanged), "page" (a URL
+  // template), "blank" (shipped blank page) or "close" (close the tab).
+  const SHOW_KINDS = ["message", "page", "blank", "close"];
+
+  // Placeholder values used only to check that a page template yields a valid URL.
+  const SAMPLE_VARS = { url: "https://blocked.example/", host: "blocked.example", count: 1, time: "12:00" };
+
+  // Why an entry would be dropped, or "" if it's fine. A half-specified or
   // malformed window is rejected rather than silently widened to "all day"
   // (that would show the 3 a.m. message at noon).
   function messageProblem(m) {
-    if (!m || typeof m.text !== "string" || !m.text.trim()) return "empty message";
+    if (!m || typeof m !== "object") return "empty entry";
+    const show = m.show ?? "message";
+    if (!SHOW_KINDS.includes(show)) return `unknown kind "${show}"`;
+    if (show === "message" && (typeof m.text !== "string" || !m.text.trim())) return "empty message";
+    if (show === "page" && !globalThis.SF_RULES?.renderUrl(m.url, SAMPLE_VARS)) {
+      return "page address must be a full http:// or https:// URL";
+    }
     const hasFrom = m.from != null && m.from !== "";
     const hasTo = m.to != null && m.to !== "";
     if (!hasFrom && !hasTo) return "";
@@ -59,11 +73,20 @@
     return "";
   }
 
+  // Keeps only the fields that matter for each kind ("message" entries keep the
+  // v1 shape: { text, from?, to? }).
   function cleanMessages(list) {
     if (!Array.isArray(list)) return [];
     return list
       .filter((m) => !messageProblem(m))
-      .map((m) => (m.from ? { from: m.from, to: m.to, text: m.text } : { text: m.text }));
+      .map((m) => {
+        const show = m.show ?? "message";
+        const out = show === "message" ? {} : { show };
+        if (m.from) Object.assign(out, { from: m.from, to: m.to });
+        if (show === "message") out.text = m.text;
+        if (show === "page") out.url = m.url.trim();
+        return out;
+      });
   }
 
   // Lowercases, drops a trailing dot, and converts non-ASCII names to punycode
@@ -130,5 +153,6 @@
     cleanPattern,
     isValidPattern,
     messageProblem,
+    SHOW_KINDS,
   };
 })();
